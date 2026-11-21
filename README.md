@@ -1,13 +1,34 @@
+<p align="center"><img src="assets/banner.png" alt="Indic chat toolkit: small open models for romanized and native-script chat in 12 South Asian languages" width="100%"></p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-6fae8b" alt="License: Apache-2.0"></a>
+  <a href="https://huggingface.co/collections/altslate/indic-chat-toolkit-6b00d1ccbffba7be2baa5fdd"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-collection-ffcc4d" alt="Hugging Face collection"></a>
+  <img src="https://img.shields.io/badge/languages-12-6fae8b" alt="12 languages">
+  <img src="https://img.shields.io/badge/runs%20in%20the%20browser-transformers.js%20%2B%20ONNX-555" alt="Runs in the browser with transformers.js and ONNX">
+  <img src="https://img.shields.io/badge/trained%20on-1%C3%97%20DGX%20Spark-76b900?logo=nvidia&logoColor=white" alt="Trained on one NVIDIA DGX Spark">
+</p>
+
 # Indic chat toolkit: training and evaluation code
 
-Code behind two small models for romanized and native-script chat in 12 South Asian languages (Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Sindhi, Sinhala):
+Code behind two small models for romanized and native-script chat in 12 South Asian languages (Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Sindhi, Sinhala).
 
-| Model | What it does | Demo |
-|---|---|---|
-| [altslate/indic-chat-lid-small](https://huggingface.co/altslate/indic-chat-lid-small) | Language ID, native script **and** romanized (26 labels) | [Space](https://huggingface.co/spaces/altslate/indic-chat-lid) |
-| [altslate/indic-chat-xlit-small](https://huggingface.co/altslate/indic-chat-xlit-small) | Romanized chat → native script, whole sentences | [Space](https://huggingface.co/spaces/altslate/indic-chat-xlit) |
+| Model | What it does | Size | Hub | Demo |
+|---|---|---|---|---|
+| [**indic-chat-lid-small**](https://huggingface.co/altslate/indic-chat-lid-small) | Language ID, native script **and** romanized (26 labels) | 140M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-chat-lid-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-chat-lid-small) | [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/altslate/indic-chat-lid) |
+| [**indic-chat-xlit-small**](https://huggingface.co/altslate/indic-chat-xlit-small) | Romanized chat → native script, whole sentences | 300M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-chat-xlit-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-chat-xlit-small) | [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/altslate/indic-chat-xlit) |
 
 Results, data provenance and limitations are on the model cards. This repository is the code **as it was run** to build and test them: research scripts, not a library. It is published so the numbers on the cards can be checked and reproduced.
+
+## Demos
+
+Both demos run the int8 ONNX models in your browser with [transformers.js](https://github.com/huggingface/transformers.js); your text never leaves your device.
+
+<table>
+<tr>
+<td width="50%"><a href="https://huggingface.co/spaces/altslate/indic-chat-xlit"><img src="assets/xlit-demo.png" alt="Transliteration demo: 'kal meeting cancel ho gayi, ghar pe hi hoon' becomes 'कल मीटिंग कैंसल हो गई, घर पर ही हूँ'"></a><br><sub><b>Transliteration</b>: romanized Hindi to Devanagari, about 2 s in the browser.</sub></td>
+<td width="50%"><a href="https://huggingface.co/spaces/altslate/indic-chat-lid"><img src="assets/lid-demo.png" alt="Language ID demo: 'tuition-e jabe ki bhabcho?' is detected as romanized Bengali (bn-Latn) at 97%"></a><br><sub><b>Language ID</b>: "tuition-e jabe ki bhabcho?" → romanized Bengali, 97%.</sub></td>
+</tr>
+</table>
 
 ## Layout
 
