@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Indic Chat Transliteration</title>
+<style>
+:root { --bg:#fafaf9; --fg:#1c1917; --muted:#57534e; --card:#ffffff; --line:#e7e5e4; --accent:#4338ca; }
+@media (prefers-color-scheme: dark) { :root { --bg:#1c1917; --fg:#f5f5f4; --muted:#a8a29e; --card:#292524; --line:#44403c; --accent:#a5b4fc; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, -apple-system, "Segoe UI", "Noto Sans", sans-serif; }
+main { max-width: 820px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 1.6rem; margin: 0 0 8px; }
+p { color: var(--muted); margin: 0 0 12px; }
+a { color: var(--accent); }
+textarea, select { width:100%; padding:12px; font:inherit; color:var(--fg); background:var(--card); border:1px solid var(--line); border-radius:8px; }
+textarea { min-height:100px; resize:vertical; }
+select { width:auto; padding:6px 10px; }
+button { font:inherit; padding:8px 18px; border-radius:8px; border:0; background:var(--accent); color:var(--bg); cursor:pointer; margin:10px 0; }
+button:disabled { opacity:.5; cursor:default; }
+.ex { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 16px; }
+.ex button { background:transparent; color:var(--fg); border:1px solid var(--line); padding:4px 10px; margin:0; font-size:.85rem; }
+.box { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; min-height:56px; white-space:pre-wrap; word-break:break-word; font-size:1.25rem; }
+.row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+#status, #det { font-size:.9rem; color:var(--muted); }
+h2 { font-size:1rem; margin:16px 0 6px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Indic chat transliteration</h1>
+<p>Type a message the way people text in the Latin alphabet ("kal meeting cancel ho gayi") and get it in native script, for Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Sindhi and Sinhala.</p>
+<p>Model: <a href="https://huggingface.co/altslate/indic-chat-xlit-small">altslate/indic-chat-xlit-small</a> (300M, Apache-2.0), run in your browser with int8 weights, which are slightly less accurate than the full model. Your text never leaves your device. The first run downloads about 300 MB; "Auto-detect" adds about 180 MB for <a href="https://huggingface.co/altslate/indic-chat-lid-small">altslate/indic-chat-lid-small</a>. By default English words are written in native script too; tick "Keep English words" to leave them in Latin script. Ambiguous spellings are sometimes wrong; see the model card.</p>
+<div class="ex" id="ex"></div>
+<div class="row"><label for="lang">Language</label> <select id="lang"></select> <label style="margin-left:12px"><input type="checkbox" id="en"> Keep English words</label> <span id="det"></span></div>
+<textarea id="inp" aria-label="Romanized message" style="margin-top:10px"></textarea>
+<button id="go" disabled>Loading model…</button> <span id="status"></span>
+<h2>Native script</h2><div class="box" id="out"></div>
+</main>
+<script type="module">
+import { pipeline, AutoModelForSeq2SeqLM, Tensor } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
+// ByT5 has no tokenizer.json: its tokenizer is just UTF-8 bytes + 3, with </s> = 1.
+const encode = (s) => [...new TextEncoder().encode(s)].map((b) => b + 3).concat([1]);
+const decode = (ids) => new TextDecoder().decode(new Uint8Array(ids.filter((i) => i >= 3).map((i) => i - 3)));
+const LANGS = { auto:"Auto-detect", hi:"Hindi", bn:"Bengali", ta:"Tamil", te:"Telugu", mr:"Marathi", gu:"Gujarati", kn:"Kannada",
+  ml:"Malayalam", pa:"Punjabi", ur:"Urdu", sd:"Sindhi", si:"Sinhala" };
+const EX = [["hi","kal meeting cancel ho gayi, ghar pe hi hoon"], ["ta","naan naalaikku varen, nee ready-a iru"], ["bn","aaj sondhebela bristi hote pare"],
+  ["kn","ninna bike puncture aaytu"], ["ml","ente phone charge theernnu"], ["ur","aap kaise hain? sab khairiyat?"], ["gu","kaam ni deadline kaale che"],
+  ["mr","mi udya yeto, kalji karu nako"], ["te","nenu repu vastanu"], ["pa","tusi kithe ho? main ghar aa gaya"]];
+const $ = (id) => document.getElementById(id);
+for (const [k, v] of Object.entries(LANGS)) { const o = document.createElement("option"); o.value = k; o.textContent = v; $("lang").appendChild(o); }
+$("lang").value = "hi";
+let xlit = null, lid = null;
+for (const [l, t] of EX) { const b = document.createElement("button"); b.textContent = `${LANGS[l]}: ${t.length > 22 ? t.slice(0, 20) + "…" : t}`;
+  b.onclick = () => { $("inp").value = t; if ($("lang").value !== "auto") $("lang").value = l; if (xlit) run(); }; $("ex").appendChild(b); }
+$("inp").value = EX[0][1];
+const seen = {};
+const progress = (p) => { if (p.status === "progress" && p.total) { seen[p.file] = [p.loaded, p.total];
+  const [l, t] = Object.values(seen).reduce((a, [x, y]) => [a[0] + x, a[1] + y], [0, 0]);
+  $("status").textContent = `Downloading model… ${Math.round(l / 1e6)} / ${Math.round(t / 1e6)} MB`; } };
+async function run() {
+  const text = $("inp").value.trim(); if (!text) return;
+  $("go").disabled = true; let lang = $("lang").value; $("det").textContent = "";
+  if (lang === "auto") {
+    if (!lid) { $("status").textContent = "Loading language detector…"; lid = await pipeline("text-classification", "altslate/indic-chat-lid-small", { dtype: "q8", progress_callback: progress }); }
+    const [top] = await lid(text); const code = top.label.split("-")[0];
+    if (!(code in LANGS) || code === "auto") { $("out").textContent = ""; $("det").textContent = `Detected ${top.label}; not one of the 12 languages.`; $("status").textContent = ""; $("go").disabled = false; return; }
+    lang = code; $("det").textContent = `Detected: ${LANGS[code]} (${Math.round(top.score * 100)}%)`;
+  }
+  $("status").textContent = "Running…"; const t0 = performance.now();
+  const ids = encode(`${lang}${$("en").checked ? "+en" : ""}: ${text}`);
+  const input_ids = new Tensor("int64", BigInt64Array.from(ids.map(BigInt)), [1, ids.length]);
+  const attention_mask = new Tensor("int64", BigInt64Array.from(ids.map(() => 1n)), [1, ids.length]);
+  const out = await xlit.generate({ input_ids, attention_mask, max_new_tokens: Math.min(1024, 4 * ids.length + 32) });
+  $("out").textContent = decode(out.tolist()[0].map(Number));
+  $("status").textContent = `${Math.round(performance.now() - t0)} ms`; $("go").disabled = false;
+}
+try {
+  xlit = await AutoModelForSeq2SeqLM.from_pretrained("altslate/indic-chat-xlit-small", { dtype: "q8", progress_callback: progress });
+  $("go").textContent = "Convert"; $("go").onclick = run;
+  $("inp").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) run(); });
+  await run();
+} catch (err) { $("status").textContent = "Could not load the model: " + err.message; }
+</script>
+</body>
+</html>
