@@ -10,13 +10,14 @@
 
 # Indic chat toolkit: training and evaluation code
 
-Code behind three small models for Indian-language text: language ID and transliteration for romanized and native-script chat in 12 South Asian languages (Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Sindhi, Sinhala), and a text normalizer for TTS in 10 of them.
+Code behind four small models for Indian-language text: language ID and transliteration for romanized and native-script chat in 12 South Asian languages (Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Sindhi, Sinhala), and text normalization for speech in 10 of them, both directions (TTS input and ASR output).
 
 | Model | What it does | Size | Hub | Demo |
 |---|---|---|---|---|
 | [**indic-chat-lid-small**](https://huggingface.co/altslate/indic-chat-lid-small) | Language ID, native script **and** romanized (26 labels) | 140M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-chat-lid-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-chat-lid-small) | [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/altslate/indic-chat-lid) |
 | [**indic-chat-xlit-small**](https://huggingface.co/altslate/indic-chat-xlit-small) | Romanized chat → native script, whole sentences | 300M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-chat-xlit-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-chat-xlit-small) | [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/altslate/indic-chat-xlit) |
 | [**indic-tts-normalizer-small**](https://huggingface.co/altslate/indic-tts-normalizer-small) | Written → spoken form for TTS (₹ amounts, times, dates, phone numbers, units, cricket scores…), 10 languages | 300M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-tts-normalizer-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-tts-normalizer-small) | [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/altslate/indic-tts-normalizer) |
+| [**indic-itn-small**](https://huggingface.co/altslate/indic-itn-small) | Spoken → written for ASR output (numbers, ₹, times, dates → digits), 10 languages | 300M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-itn-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-itn-small) | – |
 
 Results, data provenance and limitations are on the model cards. This repository is the code **as it was run** to build and test them: research scripts, not a library. It is published so the numbers on the cards can be checked and reproduced.
 
@@ -37,6 +38,7 @@ All three demos run the int8 ONNX models in your browser with [transformers.js](
 src/lid/     language ID: data synthesis, training (mmBERT-small), test sets, comparisons with GlotLID and IndicLID, ONNX export
 src/xlit/    transliteration: data building, training (ByT5-small), prediction, CER metric, IndicXlit / UnimeType baselines, ONNX checks
 src/tn/      TTS normalization: carrier sentences, slot filling with exact spoken forms, number-word fixes, tests, LLM judge, baselines
+src/itn/     inverse text normalization: the TN data reversed with canonical written forms, real-sentence tests, digit-match scorer, baselines
 jobs/<id>/   the shell script for each GPU job, in the order they were run (see below)
 spaces/      the three browser demos (static HTML + transformers.js; the models run in the browser)
 ```
@@ -66,6 +68,12 @@ spaces/      the three browser demos (static HTML + transformers.js; the models 
 3. `tn-v1` … `tn-v4b`: data (`src/tn/fill_data.py`), training (`src/xlit/train_xlit.py`), held-out programmatic tests (`score_prog.py`), the hand-written sanity set and the judge. The header of each `run.sh` says what changed and why.
 4. `onnx-tn`: ONNX export, int8 quantization and greedy-decoding checks (KV cache, as in transformers.js) against PyTorch.
 
+**indic-itn-small (released version = `itn-v2`, warm-started from itn-v1, which started from tn-v4b)**
+
+1. Data: `src/tn/fill_data.py` writes an `itn` field (canonical written form) next to each TN pair; `src/itn/make_itn.py` turns a TN data folder into ITN pairs (punctuation stripped from half the inputs). Baselines: `src/itn/baseline_copy.py` and `src/itn/baseline_indicpunct.py`; indic-punct needs pynini, which has no aarch64 wheel for Python 3.12, so it ran in a `condaforge/miniforge3` container (`conda create -n itn -c conda-forge python=3.10 pynini`, then `pip install --no-deps indic-punct` plus `inflect tqdm joblib regex`).
+2. `itn-v1`: 1 epoch on the reversed TN data. `itn-v2`: + 15k sentences with internal-zero numbers (`src/itn/zeros.py`; v1 turned 1024 into 124) mixed with 45k v1 rows; `queue.sh` waits for a free GPU.
+3. `itn-eval`: real-sentence tests (`src/itn/make_tests_real.py`): test A = Dakshina validation sentences spoken by rules; test B = LLM-written messages whose spoken form the judge accepts. Scored by digit match (`src/itn/score_itn.py`).
+
 Some job scripts read outputs of earlier jobs (for example cached GlotLID predictions). Test sets were never used for training or for choosing settings; exact overlap between training data and test sets is checked in `jobs/lid-v4/run.sh` and `src/xlit/build_data.py`.
 
 ## Environment
@@ -84,7 +92,7 @@ Adjust the paths to your machine. Teacher-written data is not included here; the
 - [Aksharantar](https://huggingface.co/datasets/ai4bharat/Aksharantar) (AI4Bharat; CC0 mined pairs, CC-BY manual pairs): word pairs for xlit v2.
 - [Hinglish-Everyday-Conversations-1M](https://huggingface.co/datasets/Abhishekcr448/Hinglish-Everyday-Conversations-1M) (MIT), [english-to-hinglish](https://huggingface.co/datasets/findnitai/english-to-hinglish) (Apache-2.0), [wikimedia/wikipedia](https://huggingface.co/datasets/wikimedia/wikipedia) (CC BY-SA 4.0): LID training text.
 - Teacher outputs from [Ornith-1.5-35B-A3B](https://huggingface.co/ornith-ai/Ornith-1.5-35B-A3B) (MIT).
-- TTS normalizer number words: [indic-numtowords](https://github.com/AI4Bharat/indic-numtowords) (AI4Bharat, MIT), with corrections in `src/tn/lex_hand.py`; month and unit names from Unicode CLDR via [babel](https://babel.pocoo.org/) (Unicode license).
+- TTS normalizer and ITN number words: [indic-numtowords](https://github.com/AI4Bharat/indic-numtowords) (AI4Bharat, MIT), with corrections in `src/tn/lex_hand.py`; month and unit names from Unicode CLDR via [babel](https://babel.pocoo.org/) (Unicode license).
 
 `src/xlit/indicxlit/custom_interactive.py` is from fairseq (Facebook, MIT; distributed with AI4Bharat IndicXlit) and keeps its original header.
 

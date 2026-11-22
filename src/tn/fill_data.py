@@ -63,6 +63,12 @@ class Lang:
     def group(s, v):  # Indian grouping 1,23,456 half the time
         t = str(v)
         if v < 1000 or s.r.random() < 0.5: return t
+        return s.igroup(v)
+
+    @staticmethod
+    def igroup(v):  # always Indian grouping (ITN canonical form for amounts)
+        t = str(v)
+        if v < 1000: return t
         head, tail = t[:-3], t[-3:]; parts = []
         while len(head) > 2: parts.insert(0, head[-2:]); head = head[:-2]
         return ",".join([head] + parts + [tail]) if head else ",".join(parts + [tail])
@@ -87,12 +93,12 @@ class Lang:
         r, x, l = s.r, s.x, s.l
         if kind == "NUMBER":
             v = r.choice([r.randint(2, 99), r.randint(100, 999), r.randint(1000, 99999), r.randint(100000, 99999999)])
-            return s.digits(s.group(v)), W(v, l)
+            s.canon = str(v); return s.digits(s.group(v)), W(v, l)
         if kind == "AMOUNT":
             v = r.choice([r.randint(5, 999), r.randint(1000, 99999), r.randint(100000, 9999999)]); p = r.choice([0, 0, 0, r.randint(1, 99)])
             num = s.group(v) + (f".{p:02d}" if p else ""); w = r.choice(["₹{}", "₹ {}", "Rs. {}", "Rs {}", "INR {}"]).format(num)
             sp = f"{W(v, l)} {x['rupees']}" + (" ".join(["", x["and_"], W(p, l), x["paise"]]).replace("  ", " ") if p else "")
-            return s.digits(w), sp
+            s.canon = "₹" + s.igroup(v) + (f".{p:02d}" if p else ""); return s.digits(w), sp
         if kind == "TIME":
             h, m = r.randint(1, 12), r.choice([0, 0, 15, 30, 45, r.randint(1, 59)]); ap = r.choice(["", "", "AM", "PM", "am", "pm", "a.m.", "p.m."])
             w = f"{h}:{m:02d}" + (" " + ap if ap else "")
@@ -101,37 +107,40 @@ class Lang:
                 pm = ap.lower().startswith("p")
                 word = (x["night"] if h == 12 or h <= 3 else x["am"]) if not pm else x["noon"] if h == 12 or h <= 4 else x["eve"] if h <= 7 else x["night"]
                 sp = f"{word} {sp}"
+            s.canon = (f"{word} " if ap else "") + (x["oclock"].format(h=h) if m == 0 else f"{h}:{m:02d}")
             return s.digits(w), sp
         if kind in ("DATE", "YEAR"):
             y = r.choice([r.randint(1900, 1999), r.randint(2000, 2030), r.randint(1100, 1899)]) if kind == "YEAR" else r.randint(1950, 2030)
-            if kind == "YEAR": return s.digits(str(y)), s.year(y)
+            if kind == "YEAR": s.canon = str(y); return s.digits(str(y)), s.year(y)
             d, mo = r.randint(1, 28), r.randint(1, 12); f = r.randint(0, 3)
             w = [f"{d:02d}/{mo:02d}/{y}", f"{d}-{mo}-{y}", f"{d} {x['months'][mo - 1]} {y}", f"{d}.{mo:02d}.{y}"][f]
-            return s.digits(w), f"{W(d, l)} {x['months'][mo - 1]} {s.year(y)}"
+            s.canon = f"{d} {x['months'][mo - 1]} {y}"; return s.digits(w), f"{W(d, l)} {x['months'][mo - 1]} {s.year(y)}"
         if kind == "PERCENT":
             a = r.randint(1, 99); b = str(r.randint(1, 9)) if r.random() < 0.3 else ""
-            words = s.dec(a, b) if b else W(a, l); sp = s.unit("percent", words)
+            words = s.dec(a, b) if b else W(a, l); sp = s.unit("percent", words); s.canon = f"{a}.{b}%" if b else f"{a}%"
             return (s.digits(f"{a}.{b}%" if b else f"{a}%"), sp) if sp else None
         if kind == "DECIMAL":
             a, b = r.randint(0, 999), str(r.randint(1, 99))
-            return s.digits(f"{a}.{b}"), s.dec(a, b)
+            s.canon = f"{a}.{b}"; return s.digits(f"{a}.{b}"), s.dec(a, b)
         if kind == "PHONE":
             ph = str(r.randint(6, 9)) + "".join(str(r.randint(0, 9)) for _ in range(9))
             w = r.choice([ph, ph[:5] + " " + ph[5:], ph[:5] + "-" + ph[5:]])
-            return s.digits(w), " ".join(x["zero"] if c == "0" else W(c, l) for c in ph)
+            s.canon = ph; return s.digits(w), " ".join(x["zero"] if c == "0" else W(c, l) for c in ph)
         if kind == "QUANTITY":
             k = r.choice(list(UNIT_ABBR)); v = r.choice([r.randint(1, 99), r.randint(100, 999)])
             if k == "C": v = r.randint(5, 48)
-            sp = s.unit(k, W(v, l))
+            sp = s.unit(k, W(v, l)); s.canon = s.unit(k, str(v))
             return (s.digits(f"{v}{r.choice(['', ' '])}{r.choice(UNIT_ABBR[k])}"), sp) if sp else None
         if kind == "ORDINAL":
             v = r.choice([r.randint(1, 10), r.randint(11, 50)]); o = ordinal(l, v, r)
-            return (s.digits(o[0]), o[1]) if o else None
+            s.canon = o[1] if o else None; return (s.digits(o[0]), o[1]) if o else None  # ITN keeps ordinal words
         if kind == "RANGE":
             a = r.randint(1, 90); b = a + r.randint(1, 30)
+            s.canon = x["range"].format(a=a, b=b)
             return s.digits(f"{a}{r.choice(['-', '–', ' - ', ' to '])}{b}"), x["range"].format(a=W(a, l), b=W(b, l))
         if kind == "SCORE":
             ru, wk = r.randint(40, 420), r.randint(1, 9)
+            s.canon = x["score"].format(r=ru, w=wk)
             return s.digits(r.choice([f"{ru}/{wk}", f"{ru}-{wk}"])), x["score"].format(r=W(ru, l), w=W(wk, l))
         return None
 
@@ -147,19 +156,20 @@ def fill(langs, rows, per, seed, pair=0.0):
         L = langs.get(c["lang"])
         if not L: continue
         for j in range(per):
-            L.r.seed(f"{seed}-{i}-{j}")
+            L.r.seed(f"{seed}-{i}-{j}"); L.canon = None
             try: v = L.value(c["kind"])
             except Exception: v = None
+            canon = L.canon
             if not v or re.search(r"[0-9]", v[1]): continue
             kind = c["kind"]
             if pair and kind in PAIRK and L.r.random() < pair:
                 try: v2 = L.value(L.r.choice(PAIRK))
                 except Exception: v2 = None
                 if not v2 or re.search(r"[0-9]", v2[1]): continue
-                v, kind = (f"{v[0]}, {v2[0]}", f"{v[1]}, {v2[1]}"), "PAIR"
+                v, kind = (f"{v[0]}, {v2[0]}", f"{v[1]}, {v2[1]}"), "PAIR"; canon = f"{canon}, {L.canon}" if canon and L.canon else None
             ph = f"⟦{c['kind']}⟧"
             out.append({"src": f"{c['lang']}-tn: " + c["carrier"].replace(ph, v[0]), "tgt": c["carrier"].replace(ph, v[1]),
-                        "lang": c["lang"], "kind": kind})
+                        "lang": c["lang"], "kind": kind, "itn": c["carrier"].replace(ph, canon) if canon else None})  # itn: canonical written form
     return out
 
 
@@ -175,7 +185,8 @@ def combine(rows, n, k, seed):
     for i in range(n):
         lang = r.choice(sorted(by)); parts = r.sample(by[lang], k if k else r.choice([2, 2, 3]))
         out.append({"src": parts[0]["src"] + " " + " ".join(x["src"].split(": ", 1)[1] for x in parts[1:]),
-                    "tgt": " ".join(x["tgt"] for x in parts), "lang": lang, "kind": "MULTI"})
+                    "tgt": " ".join(x["tgt"] for x in parts), "lang": lang, "kind": "MULTI",
+                    "itn": " ".join(x["itn"] for x in parts) if all(x.get("itn") for x in parts) else None})
     return out
 
 
@@ -191,9 +202,10 @@ def wiki(L, k_num, k_id):
             t = " ".join(t.split())
             if not 30 <= len(t) <= 400: continue
             if not re.search(r"\d", t):
-                if len(ident) < k_id: ident.append({"src": f"{lang}-tn: {t}", "tgt": t, "lang": lang, "kind": "IDENTITY"})
+                if len(ident) < k_id: ident.append({"src": f"{lang}-tn: {t}", "tgt": t, "lang": lang, "kind": "IDENTITY", "itn": t})
             elif len(num) < k_num and not WIKI_BAD.search(t):
-                num.append({"src": f"{lang}-tn: {t}", "tgt": re.sub(r"\d+", rep, t), "lang": lang, "kind": "WIKI"})
+                num.append({"src": f"{lang}-tn: {t}", "tgt": re.sub(r"\d+", rep, t), "lang": lang, "kind": "WIKI",
+                            "itn": re.sub(r"\d", lambda m: str(int(m.group(0))), t)})  # ITN target: native digits -> ASCII
             if len(num) >= k_num and len(ident) >= k_id: break
     return num + ident
 
