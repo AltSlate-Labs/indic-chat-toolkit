@@ -10,7 +10,7 @@
 
 # Indic chat toolkit: training and evaluation code
 
-Code behind five small models for Indian-language text: message-level and word-level language ID and transliteration for romanized and native-script chat in 12 South Asian languages (Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Sindhi, Sinhala), and text normalization for speech in 10 of them, both directions (TTS input and ASR output).
+Code behind six small models for Indian-language text: message-level and word-level language ID and transliteration for romanized and native-script chat in 12 South Asian languages (Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Sindhi, Sinhala), text normalization for speech in 10 of them, both directions (TTS input and ASR output), and punctuation restoration for ASR output.
 
 | Model | What it does | Size | Hub | Demo |
 |---|---|---|---|---|
@@ -18,6 +18,7 @@ Code behind five small models for Indian-language text: message-level and word-l
 | [**indic-chat-wordlid-small**](https://huggingface.co/altslate/indic-chat-wordlid-small) | Word-level language ID for code-mixed chat (12 languages + English, incl. two Indian languages in one message) | 140M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-chat-wordlid-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-chat-wordlid-small) | [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/altslate/indic-chat-lid) |
 | [**indic-chat-xlit-small**](https://huggingface.co/altslate/indic-chat-xlit-small) | Romanized chat → native script, whole sentences | 300M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-chat-xlit-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-chat-xlit-small) | [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/altslate/indic-chat-xlit) |
 | [**indic-tts-normalizer-small**](https://huggingface.co/altslate/indic-tts-normalizer-small) | Written → spoken form for TTS (₹ amounts, times, dates, phone numbers, units, cricket scores…), 10 languages | 300M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-tts-normalizer-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-tts-normalizer-small) | [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/altslate/indic-tts-normalizer) |
+| [**indic-punctuation-base**](https://huggingface.co/altslate/indic-punctuation-base) | Punctuation restoration (comma, sentence end, question) for ASR output, 12 languages + English | 307M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-punctuation-base&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-punctuation-base) | – |
 | [**indic-itn-small**](https://huggingface.co/altslate/indic-itn-small) | Spoken → written for ASR output (numbers, ₹, times, dates → digits), 10 languages | 300M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-itn-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-itn-small) | [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/altslate/indic-tts-normalizer) |
 
 Results, data provenance and limitations are on the model cards. This repository is the code **as it was run** to build and test them: research scripts, not a library. It is published so the numbers on the cards can be checked and reproduced.
@@ -40,6 +41,7 @@ src/wordlid/ word-level language ID: labelled mixed-message synthesis, COMI-LING
 src/lid/     language ID: data synthesis, training (mmBERT-small), test sets, comparisons with GlotLID and IndicLID, ONNX export
 src/xlit/    transliteration: data building, training (ByT5-small), prediction, CER metric, IndicXlit / UnimeType baselines, ONNX checks
 src/tn/      TTS normalization: carrier sentences, slot filling with exact spoken forms, number-word fixes, tests, LLM judge, baselines
+src/punct/   punctuation restoration: data from punctuated text, 1-800-BAD-CODE baseline, F1 scorer, ONNX checks
 src/itn/     inverse text normalization: the TN data reversed with canonical written forms, real-sentence tests, digit-match scorer, baselines
 jobs/<id>/   the shell script for each GPU job, in the order they were run (see below)
 spaces/      the three browser demos (static HTML + transformers.js; the models run in the browser)
@@ -75,6 +77,12 @@ spaces/      the three browser demos (static HTML + transformers.js; the models 
 2. `tn-lex`: carrier sentences with one typed slot, written by the training teacher (Ornith-1.5-35B-A3B; `src/tn/gen_carriers.py`). The LLM-written lexicon from `make_lexicon.py` was rejected; `src/tn/lex_hand.py` is the hand-written replacement.
 3. `tn-v1` … `tn-v4b`: data (`src/tn/fill_data.py`), training (`src/xlit/train_xlit.py`), held-out programmatic tests (`score_prog.py`), the hand-written sanity set and the judge. The header of each `run.sh` says what changed and why.
 4. `onnx-tn`: ONNX export, int8 quantization and greedy-decoding checks (KV cache, as in transformers.js) against PyTorch.
+
+**indic-punctuation-base (released version = `punct-v2`)**
+
+1. Data and tests: `src/punct/synth_punct.py` (Dakshina train/test splits, Ornith chat with 10% held out, English Wikipedia; tn-gap test B as the messages test).
+2. `punct-v1` (mmBERT-small) with `baseline.sh` (1-800-BAD-CODE xlm-roberta via `punctuators`, installed with `--no-deps` plus sentencepiece/omegaconf); `punct-v2`: mmBERT-base and more data. Scored with `score_punct.py`.
+3. `onnx-punct`: fp32 + per-channel int8 (`src/export_onnx.py`, `src/requant_onnx.py`); the fp16 file was exported directly from PyTorch in half precision on the GPU; F1 through onnxruntime with `predict_onnx.py`.
 
 **indic-itn-small (released version = `itn-v2`, warm-started from itn-v1, which started from tn-v4b)**
 
