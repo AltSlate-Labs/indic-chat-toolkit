@@ -28,12 +28,13 @@ label { color:var(--muted); font-size:.95rem; }
 <body>
 <main>
 <h1>Screenshot PII redactor</h1>
-<p>Drop a screenshot of a chat, an app or a document, and the personal data in it is covered: Aadhaar, PAN, UPI IDs, phone numbers, bank accounts, IFSC, GSTIN, emails, passport, driving licence, voter ID, vehicle numbers, PIN codes, names, addresses and dates of birth, in English, Hindi and Hinglish (Latin or Devanagari script).</p>
+<p>Drop a screenshot of a chat, an app or a document, and the personal data in it is covered: Aadhaar, PAN, UPI IDs, phone numbers, bank accounts, IFSC, GSTIN, emails, passport, driving licence, voter ID, vehicle numbers, PIN codes, names, addresses and dates of birth, in English, Hindi and Hinglish (Latin or Devanagari script). With "more languages" it also handles chats in Bengali, Gujarati, Kannada, Marathi, Tamil and Telugu: identifiers typed in Latin letters and digits are covered well (about 93% on test screenshots), but names and addresses written in those scripts mostly are not (it can read Marathi, Tamil and Telugu text, not Bengali, Gujarati or Kannada).</p>
 <p><b>Everything runs in your browser; the image never leaves your device.</b> Text is read with PaddlePaddle's PP-OCRv5 models (Apache-2.0; a Latin recognizer and a Devanagari one, the more confident reading wins per line) and the personal data is found with <a href="https://huggingface.co/altslate/indic-pii-redactor-small">altslate/indic-pii-redactor-small</a>. The first run downloads about 170 MB. On rendered test screenshots it covered 96% of Latin-script and 90% of Devanagari personal data; it misses some names and dates and can't read other scripts yet. Always check the result before sharing.</p>
 <div>
   <label class="file">Choose image<input type="file" id="file" accept="image/*" hidden></label>
-  <button class="ghost" id="ex1">Example: Hinglish chat</button><button class="ghost" id="ex2">Example: English + Hindi</button>
+  <button class="ghost" id="ex1">Example: Hinglish chat</button><button class="ghost" id="ex2">Example: English + Hindi</button><button class="ghost" id="ex3">Example: Tamil (more languages)</button>
   <label><input type="checkbox" id="labels" checked> show labels</label>
+  <label style="margin-left:10px"><input type="checkbox" id="more"> more languages (beta): Bengali, Gujarati, Kannada, Marathi, Tamil, Telugu (+330 MB)</label>
 </div>
 <div id="drop">…or paste (Ctrl/Cmd+V) or drop an image here</div>
 <span id="status">Loading models…</span>
@@ -128,7 +129,7 @@ function show(img) { cur = img; const c = $("src"); c.width = img.width; c.heigh
 function loadURL(u) { const i = new Image(); i.crossOrigin = "anonymous"; i.onload = () => show(i); i.src = u; }
 function loadFile(f) { if (f && f.type.startsWith("image/")) loadURL(URL.createObjectURL(f)); }
 $("file").onchange = (e) => loadFile(e.target.files[0]);
-$("ex1").onclick = () => loadURL("example-1.png"); $("ex2").onclick = () => loadURL("example-2.png");
+$("ex1").onclick = () => loadURL("example-1.png"); $("ex2").onclick = () => loadURL("example-2.png"); $("ex3").onclick = () => loadURL("example-3.png");
 $("labels").onchange = () => cur && redact(cur);
 document.addEventListener("paste", (e) => { for (const it of e.clipboardData.items) if (it.type.startsWith("image/")) loadFile(it.getAsFile()); });
 $("drop").ondragover = (e) => e.preventDefault(); $("drop").ondrop = (e) => { e.preventDefault(); loadFile(e.dataTransfer.files[0]); };
@@ -144,6 +145,16 @@ try {
       [await ort.InferenceSession.create(`${HF}/${m}/resolve/main/inference.onnx`, opt), ["<blank>", ...(await (await fetch(d)).json()), " "]])),
   ]);
   tagger = await pipeline("token-classification", "altslate/indic-pii-redactor-small", { dtype: "q8", progress_callback: progress });
+  $("more").onchange = async () => {  // 6-language PII model + Tamil and Telugu recognizers (Paddle has no ONNX bn/gu/kn recognizer)
+    $("more").disabled = true; $("status").textContent = "Loading more languages…";
+    try {
+      const extra = await Promise.all([["ta_PP-OCRv5_mobile_rec_onnx", "dict-tamil.json"], ["te_PP-OCRv5_mobile_rec_onnx", "dict-telugu.json"]].map(async ([m, d]) =>
+        [await ort.InferenceSession.create(`${HF}/${m}/resolve/main/inference.onnx`, opt), ["<blank>", ...(await (await fetch(d)).json()), " "]]));
+      recs.push(...extra);
+      tagger = await pipeline("token-classification", "altslate/indic-pii-redactor-base", { dtype: "q8", progress_callback: progress });
+      $("status").textContent = "More languages loaded."; if (cur) redact(cur);
+    } catch (err) { $("status").textContent = "Could not load: " + err.message; $("more").disabled = false; $("more").checked = false; }
+  };
   $("status").textContent = "Ready."; loadURL("example-1.png");
 } catch (err) { $("status").textContent = "Could not load the models: " + err.message; }
 </script>

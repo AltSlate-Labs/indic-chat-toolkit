@@ -15,7 +15,7 @@ shots = [json.loads(l) for l in open(f"{d}/shots.jsonl", encoding="utf-8")]; ocr
 area = lambda b: max(0, b[2] - b[0]) * max(0, b[3] - b[1])
 inter = lambda a, b: area([max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])])
 native = lambda t: bool(re.search(r"[ऀ-෿]", t))
-R = collections.defaultdict(lambda: [0, 0]); RA = [0, 0]; U = collections.defaultdict(lambda: [0, 0]); fb = [0, 0]
+R = collections.defaultdict(lambda: [0, 0]); RA = [0, 0]; LG = collections.defaultdict(lambda: [0, 0]); U = collections.defaultdict(lambda: [0, 0]); fb = [0, 0]
 for x, o in zip(shots, ocr):
     text, pos = "", []
     for li, L in enumerate(o["lines"]):
@@ -46,6 +46,7 @@ for x, o in zip(shots, ocr):
             DUMP.write(json.dumps({"label": b["label"], "gold": span_text, "ocr_line": L["text"], "coverage": round(cov, 2),
                                    "pred_on_line": [text[s:e] for s, e, _ in spans if any(pos[k] and o["lines"][pos[k][0]] is L for k in range(s, min(e, len(pos))))]},
                                   ensure_ascii=False) + "\n")
+        LG[m.get("lang") or "?"][0] += ok; LG[m.get("lang") or "?"][1] += 1
         R[grp][0] += ok; R[grp][1] += 1; R["native" if native(span_text) else "latin"][0] += ok; R["native" if native(span_text) else "latin"][1] += 1
     for p in pred:
         fb[1] += 1; fb[0] += sum(inter(p, b["xyxy"]) for b in x["boxes"]) < 0.3 * max(1, area(p))
@@ -59,5 +60,6 @@ print(f"redacted gold boxes: latin/digit {R['latin'][0]}/{R['latin'][1]} = {R['l
 print(f"(v1 area metric, all scripts: {RA[0]}/{RA[1]} = {RA[0]/max(1,RA[1]):.3f})")
 print(f"no-OCR upper bound (spans found in the original text): latin {U['latin'][0]/max(1,U['latin'][1]):.3f} | native {U['native'][0]/max(1,U['native'][1]):.3f}")
 print(f"false blur: {fb[0]}/{fb[1]} predicted boxes = {fb[0]/max(1,fb[1]):.3f}")
+print("by message language: " + " ".join(f"{l}:{a/n:.2f}(n={n})" for l, (a, n) in sorted(LG.items())))
 for g, (a, n) in sorted(R.items()):
     if " " in g and n >= 10: print(f"   {g:22s} {a/n:.2f} (n={n})")

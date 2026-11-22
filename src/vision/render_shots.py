@@ -6,7 +6,11 @@ The source messages are the held-out PII test sets (synthetic people; never used
 import json, os, random, sys
 from PIL import Image, ImageDraw, ImageFont
 F = os.path.expanduser("~/Downloads/data/fonts/noto")
-FONTS = {"latin": f"{F}/NotoSans-Regular.ttf", "deva": f"{F}/NotoSansDevanagari-Regular.ttf"}
+FONTS = {"latin": f"{F}/NotoSans-Regular.ttf", "deva": f"{F}/NotoSansDevanagari-Regular.ttf", "beng": f"{F}/NotoSansBengali-Regular.ttf",
+         "gujr": f"{F}/NotoSansGujarati-Regular.ttf", "taml": f"{F}/NotoSansTamil-Regular.ttf", "telu": f"{F}/NotoSansTelugu-Regular.ttf",
+         "knda": f"{F}/NotoSansKannada-Regular.ttf"}
+BLOCKS = [(0x0900, 0x097F, "deva"), (0x0980, 0x09FF, "beng"), (0x0A80, 0x0AFF, "gujr"), (0x0B80, 0x0BFF, "taml"),
+          (0x0C00, 0x0C7F, "telu"), (0x0C80, 0x0CFF, "knda")]
 THEMES = [dict(bg=(236, 229, 221), me=(220, 248, 198), them=(255, 255, 255), fg=(20, 20, 20)),   # light chat
           dict(bg=(11, 20, 26), me=(0, 92, 75), them=(32, 44, 51), fg=(233, 237, 239)),         # dark chat
           dict(bg=(255, 255, 255), me=(0, 132, 255), them=(228, 230, 235), fg=(15, 15, 15))]   # plain
@@ -22,7 +26,7 @@ class Fonts:
     def runs(text):
         out = []
         for c in text:
-            k = "deva" if "ऀ" <= c <= "ॿ" else ("prev" if c in " .,-/:()'\"" and out else "latin")
+            k = next((f for lo, hi, f in BLOCKS if lo <= ord(c) <= hi), None) or ("prev" if c in " .,-/:()'\"" and out else "latin")
             k = out[-1][0] if k == "prev" else k
             if out and out[-1][0] == k: out[-1][1] += c
             else: out.append([k, c])
