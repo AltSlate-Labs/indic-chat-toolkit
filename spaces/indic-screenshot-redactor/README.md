@@ -27,8 +27,8 @@ Covers Indian personal data in a screenshot (chat, app, document) **entirely in 
 
 **More languages (beta).** Ticking "more languages" adds Tamil and Telugu recognizers and switches to [altslate/indic-pii-redactor-base](https://huggingface.co/altslate/indic-pii-redactor-base) (Bengali, Gujarati, Kannada, Marathi, Tamil, Telugu). On 300 screenshots from its held-out 6-language test (names it never saw in training): identifiers typed in Latin letters and digits were covered 93% of the time (88–96% by language), but personal data written in the Indian scripts only 25% (Marathi 49%, Telugu 41%, Gujarati 25%, Tamil 23%, Bengali 14%, Kannada 3%). Part of that is the OCR (PaddlePaddle has no ONNX recognizer for Bengali, Gujarati or Kannada), part the PII model, which finds only 57% of these held-out native-script names and addresses even in the true text.
 
-**Not covered yet:** scripts other than Latin and Devanagari (Bengali, Tamil, Telugu, …: the OCR here cannot read them), handwriting, photos of documents at an angle, and text inside images within the screenshot.
+**Not covered yet:** reading Bengali, Gujarati, Kannada, Malayalam, Punjabi or Urdu script (no ONNX recognizer; Tamil and Telugu only in the beta mode), handwriting, photos of documents at an angle, and text inside images within the screenshot.
 
 Code and evaluation: [github.com/AltSlate-Labs/indic-chat-toolkit](https://github.com/AltSlate-Labs/indic-chat-toolkit) (`src/vision/`).
 
-Third-party: the OCR models are loaded from the PaddlePaddle repositories on Hugging Face; `dict-latin.json` and `dict-devanagari.json` are the character dictionaries from those models' `inference.yml` files (PaddleOCR, Apache-2.0, © PaddlePaddle Authors). The example screenshots were rendered by us from synthetic test messages.
+Third-party: the OCR models are loaded from the PaddlePaddle repositories on Hugging Face; `dict-latin.json`, `dict-devanagari.json`, `dict-tamil.json` and `dict-telugu.json` are the character dictionaries from those models' `inference.yml` files (PaddleOCR, Apache-2.0, © PaddlePaddle Authors). The example screenshots were rendered by us from synthetic test messages.
