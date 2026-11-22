@@ -10,7 +10,7 @@
 
 # Indic chat toolkit: training and evaluation code
 
-Code behind six small models for Indian-language text: message-level and word-level language ID and transliteration for romanized and native-script chat in 12 South Asian languages (Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Sindhi, Sinhala), text normalization for speech in 10 of them, both directions (TTS input and ASR output), and punctuation restoration for ASR output.
+Code behind six small models for Indian-language text and a browser screenshot redactor: message-level and word-level language ID and transliteration for romanized and native-script chat in 12 South Asian languages (Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Sindhi, Sinhala), text normalization for speech in 10 of them, both directions (TTS input and ASR output), and punctuation restoration for ASR output.
 
 | Model | What it does | Size | Hub | Demo |
 |---|---|---|---|---|
@@ -41,10 +41,11 @@ src/wordlid/ word-level language ID: labelled mixed-message synthesis, COMI-LING
 src/lid/     language ID: data synthesis, training (mmBERT-small), test sets, comparisons with GlotLID and IndicLID, ONNX export
 src/xlit/    transliteration: data building, training (ByT5-small), prediction, CER metric, IndicXlit / UnimeType baselines, ONNX checks
 src/tn/      TTS normalization: carrier sentences, slot filling with exact spoken forms, number-word fixes, tests, LLM judge, baselines
+src/vision/  screenshot PII redaction: chat-screenshot renderer with exact PII boxes, PP-OCRv5 ONNX runner (numpy + Pillow), scorer
 src/punct/   punctuation restoration: data from punctuated text, 1-800-BAD-CODE baseline, F1 scorer, ONNX checks
 src/itn/     inverse text normalization: the TN data reversed with canonical written forms, real-sentence tests, digit-match scorer, baselines
 jobs/<id>/   the shell script for each GPU job, in the order they were run (see below)
-spaces/      the three browser demos (static HTML + transformers.js; the models run in the browser)
+spaces/      the browser demos (static HTML + transformers.js; the models run in the browser)
 ```
 
 ### Which jobs produced the released models
@@ -77,6 +78,10 @@ spaces/      the three browser demos (static HTML + transformers.js; the models 
 2. `tn-lex`: carrier sentences with one typed slot, written by the training teacher (Ornith-1.5-35B-A3B; `src/tn/gen_carriers.py`). The LLM-written lexicon from `make_lexicon.py` was rejected; `src/tn/lex_hand.py` is the hand-written replacement.
 3. `tn-v1` … `tn-v4b`: data (`src/tn/fill_data.py`), training (`src/xlit/train_xlit.py`), held-out programmatic tests (`score_prog.py`), the hand-written sanity set and the judge. The header of each `run.sh` says what changed and why.
 4. `onnx-tn`: ONNX export, int8 quantization and greedy-decoding checks (KV cache, as in transformers.js) against PyTorch.
+
+**Screenshot PII redactor (Space `altslate/indic-screenshot-redactor`)**
+
+`vision-probe`: renders held-out PII test messages as chat screenshots with exact pixel boxes (`src/vision/render_shots.py`, Noto fonts), reads them with PaddlePaddle's PP-OCRv5 ONNX models (`ppocr.py`, `ocr_shots.py`: detector + Latin and Devanagari recognizers, best confidence per line) and scores the redaction (`eval_shots.py`). The Space is a JavaScript port of the same pipeline.
 
 **indic-punctuation-base (released version = `punct-v2`)**
 

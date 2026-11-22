@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Screenshot PII Redactor</title>
+<style>
+:root { --bg:#fafaf9; --fg:#1c1917; --muted:#57534e; --card:#ffffff; --line:#e7e5e4; --accent:#4338ca; }
+@media (prefers-color-scheme: dark) { :root { --bg:#1c1917; --fg:#f5f5f4; --muted:#a8a29e; --card:#292524; --line:#44403c; --accent:#a5b4fc; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, -apple-system, "Segoe UI", "Noto Sans", sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 1.6rem; margin: 0 0 8px; }
+p { color: var(--muted); margin: 0 0 12px; }
+a { color: var(--accent); }
+button, .file { font:inherit; padding:8px 16px; border-radius:8px; border:0; background:var(--accent); color:var(--bg); cursor:pointer; margin:4px 6px 4px 0; display:inline-block; }
+button:disabled { opacity:.5; cursor:default; }
+.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); }
+#drop { border:2px dashed var(--line); border-radius:10px; padding:18px; text-align:center; color:var(--muted); margin:10px 0; }
+.grid { display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-top:12px; }
+@media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+canvas { width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:var(--card); }
+#status { font-size:.9rem; color:var(--muted); }
+#found { font-size:.9rem; color:var(--muted); white-space:pre-wrap; }
+label { color:var(--muted); font-size:.95rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>Screenshot PII redactor</h1>
+<p>Drop a screenshot of a chat, an app or a document, and the personal data in it is covered: Aadhaar, PAN, UPI IDs, phone numbers, bank accounts, IFSC, GSTIN, emails, passport, driving licence, voter ID, vehicle numbers, PIN codes, names, addresses and dates of birth, in English, Hindi and Hinglish (Latin or Devanagari script).</p>
+<p><b>Everything runs in your browser; the image never leaves your device.</b> Text is read with PaddlePaddle's PP-OCRv5 models (Apache-2.0; a Latin recognizer and a Devanagari one, the more confident reading wins per line) and the personal data is found with <a href="https://huggingface.co/altslate/indic-pii-redactor-small">altslate/indic-pii-redactor-small</a>. The first run downloads about 170 MB. On rendered test screenshots it covered 96% of Latin-script and 90% of Devanagari personal data; it misses some names and dates and can't read other scripts yet. Always check the result before sharing.</p>
+<div>
+  <label class="file">Choose image<input type="file" id="file" accept="image/*" hidden></label>
+  <button class="ghost" id="ex1">Example: Hinglish chat</button><button class="ghost" id="ex2">Example: English + Hindi</button>
+  <label><input type="checkbox" id="labels" checked> show labels</label>
+</div>
+<div id="drop">…or paste (Ctrl/Cmd+V) or drop an image here</div>
+<span id="status">Loading models…</span>
+<div class="grid"><div><b>Original</b><canvas id="src"></canvas></div><div><b>Redacted</b> <button id="dl" disabled>Download PNG</button><canvas id="out"></canvas></div></div>
+<div id="found"></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+<script type="module">
+import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
+const ort = window.ort; ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
+const HF = "https://huggingface.co/PaddlePaddle";
+const $ = (id) => document.getElementById(id);
+let det, recs = [], tagger, cur = null;
+
+// ---- OCR: port of src/vision/ppocr.py (PP-OCRv5 mobile det + rec, DB map split into line boxes, CTC decoding) ----
+function canvasOf(img, w, h) { const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").drawImage(img, 0, 0, w, h); return c; }
+function toTensor(c, mean, std) {  // BGR, CHW, (x/255 - mean)/std per channel in BGR order (as the Python runner)
+  const { width: W, height: H } = c; const d = c.getContext("2d").getImageData(0, 0, W, H).data; const t = new Float32Array(3 * W * H);
+  for (let i = 0; i < W * H; i++) for (let k = 0; k < 3; k++) t[k * W * H + i] = (d[i * 4 + (2 - k)] / 255 - mean[k]) / std[k];
+  return new ort.Tensor("float32", t, [1, 3, H, W]);
+}
+async function detect(img) {
+  const w = img.width, h = img.height, k = Math.min(1, 960 / Math.max(w, h));
+  const W = Math.max(32, Math.round(w * k / 32) * 32), H = Math.max(32, Math.round(h * k / 32) * 32);
+  const x = toTensor(canvasOf(img, W, H), [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]);
+  const p = (await det.run({ [det.inputNames[0]]: x }))[det.outputNames[0]].data; const sx = w / W, sy = h / H, boxes = [];
+  const m = (y, x) => p[y * W + x] > 0.3; const rows = Array.from({ length: H }, (_, y) => { for (let x = 0; x < W; x++) if (m(y, x)) return true; return false; });
+  for (let y = 0; y < H;) {
+    if (!rows[y]) { y++; continue; }
+    const y0 = y; while (y < H && rows[y]) y++; const bh = y - y0;
+    const cols = Array.from({ length: W }, (_, x) => { for (let yy = y0; yy < y; yy++) if (m(yy, x)) return true; return false; });
+    for (let x = 0; x < W;) {
+      if (!cols[x]) { x++; continue; }
+      const x0 = x; let gap = 0; while (x < W && gap <= 1.2 * bh) { gap = cols[x] ? 0 : gap + 1; x++; }
+      const x1 = x - gap, pad = 0.45 * bh;
+      if ((x1 - x0) * bh > 20) boxes.push([Math.max(0, (x0 - pad) * sx), Math.max(0, (y0 - pad) * sy), Math.min(w, (x1 + pad) * sx), Math.min(h, (y + pad) * sy)]);
+    }
+  }
+  return boxes;
+}
+async function recOne(img, box, sess, chars) {
+  const [x0, y0, x1, y1] = box, Hc = 48, Wc = Math.max(16, Math.round((x1 - x0) * Hc / Math.max(1, y1 - y0)));
+  const c = document.createElement("canvas"); c.width = Wc; c.height = Hc; c.getContext("2d").drawImage(img, x0, y0, x1 - x0, y1 - y0, 0, 0, Wc, Hc);
+  const o = (await sess.run({ [sess.inputNames[0]]: toTensor(c, [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]) }))[sess.outputNames[0]];
+  const [, T, C] = o.dims, step = (x1 - x0) / T; let text = "", spans = [], prev = 0, cs = 0, cn = 0;
+  for (let t = 0; t < T; t++) {
+    let b = 0; for (let j = 1; j < C; j++) if (o.data[t * C + j] > o.data[t * C + b]) b = j;
+    if (b !== 0) { cs += o.data[t * C + b]; cn++; }
+    if (b !== 0 && b !== prev) { text += chars[b] ?? ""; spans.push([x0 + t * step, x0 + (t + 1) * step]); }
+    else if (b !== 0 && b === prev && spans.length) spans[spans.length - 1][1] = x0 + (t + 1) * step;
+    prev = b;
+  }
+  const mid = spans.map(([a, b]) => (a + b) / 2);  // widen characters to neighbour midpoints (see ppocr.py)
+  spans = mid.map((_, i) => [i === 0 ? x0 : (mid[i - 1] + mid[i]) / 2, i === mid.length - 1 ? x1 : (mid[i] + mid[i + 1]) / 2]);
+  return { text, chars: spans, conf: cn ? cs / cn : 0 };
+}
+async function ocr(img) {
+  const lines = [];
+  for (const b of await detect(img)) {
+    let best = null; for (const [s, ch] of recs) { const r = await recOne(img, b, s, ch); if (!best || r.conf > best.conf) best = r; }
+    if (best.text.trim()) lines.push({ box: b, ...best });
+  }
+  return lines;
+}
+
+// ---- PII on the OCR text, mapped back to pixels ----
+function spans(text, ents) {  // transformers.js gives grouped words without offsets: locate each in order (as the PII Space)
+  const out = []; let at = 0;
+  for (const e of ents) { const w = e.word.trim(); if (!w) continue; const s = text.indexOf(w, at); if (s < 0) continue; out.push([s, s + w.length, e.entity_group]); at = s + w.length; }
+  return out;
+}
+async function redact(img) {
+  $("status").textContent = "Reading text…"; const t0 = performance.now();
+  const lines = await ocr(img); let text = "", pos = [];
+  lines.forEach((L, li) => { for (let ci = 0; ci < L.text.length; ci++) pos.push([li, ci]); text += L.text + " "; pos.push(null); });
+  $("status").textContent = "Finding personal data…";
+  const found = spans(text, await tagger(text, { aggregation_strategy: "simple" })), boxes = [];
+  for (const [s, e, lab] of found) {
+    const by = {}; for (let k = s; k < e; k++) if (pos[k]) (by[pos[k][0]] ??= []).push(pos[k][1]);
+    for (const [li, cs] of Object.entries(by)) { const L = lines[li], a = L.chars[Math.min(...cs)], b = L.chars[Math.max(...cs)]; if (a && b) boxes.push({ xyxy: [a[0], L.box[1], b[1], L.box[3]], lab }); }
+  }
+  const out = $("out"), ctx = out.getContext("2d"); out.width = img.width; out.height = img.height; ctx.drawImage(img, 0, 0);
+  for (const { xyxy: [x0, y0, x1, y1], lab } of boxes) {
+    const pad = 0.25 * (y1 - y0);  // character edges from CTC are approximate: cover a little extra on each side
+    ctx.fillStyle = "#111"; ctx.fillRect(x0 - pad, y0, x1 - x0 + 2 * pad, y1 - y0);  // solid boxes, not blur (blurred digits can be recovered)
+    if ($("labels").checked) { ctx.fillStyle = "#fbbf24"; ctx.font = `${Math.max(10, Math.round((y1 - y0) * 0.38))}px system-ui`; ctx.fillText(lab, x0 + 3, y0 + (y1 - y0) * 0.62); }
+  }
+  $("found").textContent = found.length ? "Found: " + found.map(([s, e, l]) => `${l} "${text.slice(s, e)}"`).join(" · ") : "No personal data found.";
+  $("status").textContent = `${boxes.length} region(s) covered in ${Math.round(performance.now() - t0)} ms (${lines.length} text lines read)`; $("dl").disabled = false;
+}
+function show(img) { cur = img; const c = $("src"); c.width = img.width; c.height = img.height; c.getContext("2d").drawImage(img, 0, 0); if (tagger) redact(img); }
+function loadURL(u) { const i = new Image(); i.crossOrigin = "anonymous"; i.onload = () => show(i); i.src = u; }
+function loadFile(f) { if (f && f.type.startsWith("image/")) loadURL(URL.createObjectURL(f)); }
+$("file").onchange = (e) => loadFile(e.target.files[0]);
+$("ex1").onclick = () => loadURL("example-1.png"); $("ex2").onclick = () => loadURL("example-2.png");
+$("labels").onchange = () => cur && redact(cur);
+document.addEventListener("paste", (e) => { for (const it of e.clipboardData.items) if (it.type.startsWith("image/")) loadFile(it.getAsFile()); });
+$("drop").ondragover = (e) => e.preventDefault(); $("drop").ondrop = (e) => { e.preventDefault(); loadFile(e.dataTransfer.files[0]); };
+$("dl").onclick = () => { const a = document.createElement("a"); a.download = "redacted.png"; a.href = $("out").toDataURL("image/png"); a.click(); };
+
+const seen = {}, progress = (p) => { if (p.status === "progress" && p.total) { seen[p.file] = [p.loaded, p.total];
+  const [l, t] = Object.values(seen).reduce((a, [x, y]) => [a[0] + x, a[1] + y], [0, 0]); $("status").textContent = `Downloading models… ${Math.round(l / 1e6)} / ${Math.round(t / 1e6)} MB`; } };
+try {
+  const opt = { executionProviders: ["wasm"] };
+  [det, recs] = await Promise.all([
+    ort.InferenceSession.create(`${HF}/PP-OCRv5_mobile_det_onnx/resolve/main/inference.onnx`, opt),
+    Promise.all([["PP-OCRv5_mobile_rec_onnx", "dict-latin.json"], ["devanagari_PP-OCRv5_mobile_rec_onnx", "dict-devanagari.json"]].map(async ([m, d]) =>
+      [await ort.InferenceSession.create(`${HF}/${m}/resolve/main/inference.onnx`, opt), ["<blank>", ...(await (await fetch(d)).json()), " "]])),
+  ]);
+  tagger = await pipeline("token-classification", "altslate/indic-pii-redactor-small", { dtype: "q8", progress_callback: progress });
+  $("status").textContent = "Ready."; loadURL("example-1.png");
+} catch (err) { $("status").textContent = "Could not load the models: " + err.message; }
+</script>
+</body>
+</html>
