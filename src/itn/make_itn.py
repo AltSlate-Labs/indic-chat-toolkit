@@ -4,6 +4,8 @@ python make_itn.py TN_DIR TESTB.jsonl OUT_DIR
  from ~50% of inputs (ASR models such as IndicConformer write none) and then also from the target; ',' '.' ':' between digits stay.
  test-B: tn-gap test B reversed: src = teacher spoken form, ref = the original written message (scored by digit sequence)."""
 import json, random, re, sys, os
+import unicodedata
+nfc = lambda x: {k: unicodedata.normalize("NFC", v) if isinstance(v, str) else v for k, v in x.items()}  # indic-numtowords writes te ై decomposed (U+0C46 U+0C56)
 tn, testb, out = sys.argv[1:4]; os.makedirs(out, exist_ok=True)
 PUNCT = re.compile(r"(?<!\d)[,.।॥?!;:\"“”'‘’()\[\]⟨⟩«»-](?!\d)|۔|،|؟")
 strip = lambda t: " ".join(PUNCT.sub(" ", t).split())
@@ -16,7 +18,7 @@ for name in ("train", "dev", "test-prog", "test-multi", "test-pair"):
         if r.random() < 0.5: sp, wr = strip(sp), strip(wr)
         rows.append({"src": f"{x['lang']}-itn: {sp}", "tgt": wr, "lang": x["lang"], "kind": x["kind"]})
     with open(f"{out}/{name}.jsonl", "w", encoding="utf-8") as f:
-        for x in rows: f.write(json.dumps(x, ensure_ascii=False) + "\n")
+        for x in rows: f.write(json.dumps(nfc(x), ensure_ascii=False) + "\n")
     print(name, len(rows))
 with open(f"{out}/test-B.jsonl", "w", encoding="utf-8") as f:
     n = 0

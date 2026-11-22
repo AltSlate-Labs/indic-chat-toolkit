@@ -7,6 +7,8 @@ import gzip, json, os, random, re, sys, unicodedata
 import indic_numtowords as n
 from babel import Locale
 from lex_hand import LEX, ordinal, W
+import unicodedata
+nfc = lambda x: {k: unicodedata.normalize("NFC", v) if isinstance(v, str) else v for k, v in x.items()}  # indic-numtowords writes te ై decomposed (U+0C46 U+0C56)
 CLDR_UNITS = {"percent": "concentr-percent", "km": "length-kilometer", "m": "length-meter", "cm": "length-centimeter",
   "kg": "mass-kilogram", "g": "mass-gram", "l": "volume-liter", "ml": "volume-milliliter", "C": "temperature-celsius",
   "GB": "digital-gigabyte", "MB": "digital-megabyte", "hour": "duration-hour", "minute": "duration-minute"}
@@ -229,7 +231,7 @@ if __name__ == "__main__":
     r.shuffle(train); dev, train = train[:2000], train[2000:]
     for name, rows in (("train", train), ("dev", dev), ("test-prog", test), ("test-multi", test_multi), ("test-pair", test_pair)):
         with open(f"{out}/{name}.jsonl", "w", encoding="utf-8") as f:
-            for x in rows: f.write(json.dumps(x, ensure_ascii=False) + "\n")
+            for x in rows: f.write(json.dumps(nfc(x), ensure_ascii=False) + "\n")
     from collections import Counter
     print("langs", sorted(langs), "train", len(train), "dev", len(dev), "test-prog", len(test))
     print("train kinds", dict(Counter(x["kind"] for x in train)))

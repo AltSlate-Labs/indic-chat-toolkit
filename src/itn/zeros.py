@@ -5,6 +5,8 @@ Uses NUMBER / AMOUNT / QUANTITY carriers, split exactly as fill_data.py does (i 
 import json, random, re, sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tn"))
 from fill_data import Lang, LANGS, good_carrier, W
+import unicodedata
+nfc = lambda x: {k: unicodedata.normalize("NFC", v) if isinstance(v, str) else v for k, v in x.items()}  # indic-numtowords writes te ై decomposed (U+0C46 U+0C56)
 cf, out, n = sys.argv[1], sys.argv[2], int(sys.argv[3]); os.makedirs(out, exist_ok=True)
 car = [c for c in (json.loads(x) for x in open(cf, encoding="utf-8")) if good_carrier(c)]
 random.Random(0).shuffle(car)  # same order as fill_data.py
@@ -27,5 +29,5 @@ for name, k in (("train", n), ("test", 30)):
             if r.random() < 0.5: src, tgt = (" ".join(re.sub(r"(?<!\d)[,.।॥?!;:](?!\d)|۔|،|؟", " ", t).split()) for t in (src, tgt))
             rows.append({"src": f"{l}-itn: {src}", "tgt": tgt, "lang": l, "kind": "ZERO-" + c["kind"]})
     with open(f"{out}/zeros-{name}.jsonl", "w", encoding="utf-8") as f:
-        for x in rows: f.write(json.dumps(x, ensure_ascii=False) + "\n")
+        for x in rows: f.write(json.dumps(nfc(x), ensure_ascii=False) + "\n")
     print(name, len(rows))
