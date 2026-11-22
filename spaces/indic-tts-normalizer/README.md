@@ -9,6 +9,7 @@ license: apache-2.0
 models:
 - altslate/indic-tts-normalizer-small
 - altslate/indic-itn-small
+- altslate/indic-punctuation-base
 short_description: Numbers, ₹ and dates to spoken words, 10 Indic languages
 ---
 

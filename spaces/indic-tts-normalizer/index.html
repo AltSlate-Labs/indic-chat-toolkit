@@ -30,16 +30,16 @@ h2 { font-size:1rem; margin:16px 0 6px; }
 <main>
 <h1>Indic TTS normalizer and ITN</h1>
 <p><b>Text → spoken</b> (for text-to-speech): paste text with numbers and get the words a voice should say: ₹ amounts, times, dates, years, percentages, decimals, phone numbers, units, ordinals, ranges and cricket scores, in Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi and Urdu. <b>Spoken → text</b> (for speech-recognition output) does the reverse: number words become digits, ₹ amounts, times and dates.</p>
-<p>Models: <a href="https://huggingface.co/altslate/indic-tts-normalizer-small">altslate/indic-tts-normalizer-small</a> and <a href="https://huggingface.co/altslate/indic-itn-small">altslate/indic-itn-small</a> (300M each, Apache-2.0), run in your browser with int8 weights. Your text never leaves your device. Each mode downloads about 300 MB the first time it is used; after that a sentence takes a few seconds (the output is written byte by byte). It reads one pattern per format (for example 12/03/2024 is always day/month/year) and was not checked by native speakers; see the model card for results and limitations.</p>
+<p>Models: <a href="https://huggingface.co/altslate/indic-tts-normalizer-small">altslate/indic-tts-normalizer-small</a> and <a href="https://huggingface.co/altslate/indic-itn-small">altslate/indic-itn-small</a> (300M each, Apache-2.0), run in your browser with int8 weights. Your text never leaves your device. Each mode downloads about 300 MB the first time it is used (the optional punctuation step in "Spoken → text", <a href="https://huggingface.co/altslate/indic-punctuation-base">altslate/indic-punctuation-base</a>, another 300 MB); after that a sentence takes a few seconds (the output is written byte by byte). It reads one pattern per format (for example 12/03/2024 is always day/month/year) and was not checked by native speakers; see the model card for results and limitations.</p>
 <div class="ex" id="ex"></div>
-<div class="row"><label for="mode">Mode</label> <select id="mode"><option value="tn">Text → spoken (TTS)</option><option value="itn">Spoken → text (ITN)</option></select> <label for="lang" style="margin-left:12px">Language</label> <select id="lang"></select></div>
+<div class="row"><label for="mode">Mode</label> <select id="mode"><option value="tn">Text → spoken (TTS)</option><option value="itn">Spoken → text (ITN)</option></select> <label for="lang" style="margin-left:12px">Language</label> <select id="lang"></select> <label id="pwrap" style="margin-left:12px" hidden><input type="checkbox" id="punct"> Add punctuation first (for speech-recognition output; +300 MB)</label></div>
 <textarea id="inp" aria-label="Text to normalize" style="margin-top:10px"></textarea>
 <button id="go" disabled>Loading model…</button> <span id="status"></span>
 <h2 id="outh">Spoken form</h2><div class="box" id="out"></div>
 <button id="say" hidden>Listen (your browser's voice)</button>
 </main>
 <script type="module">
-import { AutoModelForSeq2SeqLM, Tensor } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
+import { AutoModelForSeq2SeqLM, AutoModelForTokenClassification, AutoTokenizer, Tensor } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
 // ByT5 has no tokenizer.json: its tokenizer is just UTF-8 bytes + 3, with </s> = 1.
 const encode = (s) => [...new TextEncoder().encode(s)].map((b) => b + 3).concat([1]);
 const decode = (ids) => new TextDecoder().decode(new Uint8Array(ids.filter((i) => i >= 3).map((i) => i - 3)));
@@ -61,7 +61,8 @@ const EX_ITN = [
   ["hi", "पेट्रोल दो दशमलव पाँच प्रतिशत महंगा हुआ"],
   ["ta", "என் நம்பர் ஒன்பது எட்டு ஏழு ஆறு ஐந்து நான்கு மூன்று இரண்டு ஒன்று பூஜ்ஜியம், மாலை ஆறு மணிக்கு அழைக்கவும்"],
   ["gu", "બે હજાર અગિયારના વર્ષમાં ભારત સરકાર તરફથી પદ્મશ્રી વડે સન્માનિત કરવામાં આવ્યા હતા."],
-  ["kn", "ಹಂಚಿಕೆಯಾದ ಒಟ್ಟು ನೂರ ಎಪ್ಪತ್ತಮೂರು ಟಿಎಂಸಿ ಪೂರ್ಣ ಪ್ರಮಾಣದ ನೀರನ್ನು ಬಲಸಿಕೊಳ್ಳಲಾಗುತ್ತಿದೆ."]];
+  ["kn", "ಹಂಚಿಕೆಯಾದ ಒಟ್ಟು ನೂರ ಎಪ್ಪತ್ತಮೂರು ಟಿಎಂಸಿ ಪೂರ್ಣ ಪ್ರಮಾಣದ ನೀರನ್ನು ಬಲಸಿಕೊಳ್ಳಲಾಗುತ್ತಿದೆ."],
+  ["hi", "मेरा बिल एक हज़ार दो सौ पचास रुपये आया है क्या आप कल चार बजकर तीस मिनट तक जमा कर सकते हैं"]];  // unpunctuated, as ASR writes it
 const MODES = { tn: { repo: "altslate/indic-tts-normalizer-small", ex: EX, head: "Spoken form", maxNew: (n) => Math.min(2048, 4 * n + 64) },
                itn: { repo: "altslate/indic-itn-small", ex: EX_ITN, head: "Written form", maxNew: (n) => n + 64 } };
 const $ = (id) => document.getElementById(id);
@@ -72,6 +73,23 @@ function showExamples() {
   for (const [l, t] of M.ex) { const b = document.createElement("button"); b.textContent = `${LANGS[l]}: ${t.length > 22 ? t.slice(0, 20) + "…" : t}`;
     b.onclick = () => { $("inp").value = t; $("lang").value = l; if (model) run(); }; $("ex").appendChild(b); }
   $("inp").value = M.ex[0][1]; $("lang").value = M.ex[0][0];
+  $("pwrap").hidden = $("mode").value !== "itn";
+}
+// punctuation step (altslate/indic-punctuation-base, int8: fp16 gives wrong output in transformers.js 4.3.2)
+let ptok = null, pmodel = null;
+const PEND = { hi: "।", bn: "।", pa: "।", ur: "۔" }, PCOM = { ur: "،", sd: "،" }, PQ = { ur: "؟", sd: "؟" };
+async function punctuate(text, lang) {
+  if (!pmodel) { $("status").textContent = "Loading punctuation model…";
+    ptok = await AutoTokenizer.from_pretrained("altslate/indic-punctuation-base");
+    pmodel = await AutoModelForTokenClassification.from_pretrained("altslate/indic-punctuation-base", { dtype: "q8", progress_callback: progress }); }
+  const enc = await ptok(text); const { logits } = await pmodel(enc);
+  const toks = ["<bos>", ...ptok.tokenize(text), "<eos>"]; const [, T, C] = logits.dims; const out = [];
+  for (let t = 1; t < T - 1; t++) {
+    if (toks[t].startsWith("▁") || out.length === 0) { let b = 0; for (let c = 1; c < C; c++) if (logits.data[t * C + c] > logits.data[t * C + b]) b = c;
+      out.push({ w: toks[t].replace(/^▁/, ""), l: pmodel.config.id2label[b] }); } else out[out.length - 1].w += toks[t];
+  }
+  const mark = { O: "", COMMA: PCOM[lang] || ",", PERIOD: PEND[lang] || ".", QUESTION: PQ[lang] || "?" };
+  return out.map(({ w, l }) => w + mark[l]).join(" ");
 }
 showExamples();
 const voiceFor = (l) => (window.speechSynthesis ? speechSynthesis.getVoices().find((v) => v.lang.toLowerCase().startsWith(l)) : null);
@@ -82,7 +100,9 @@ const progress = (p) => { if (p.status === "progress" && p.total) { seen[p.file]
 async function run() {
   const text = $("inp").value.trim(); if (!text) return;
   $("go").disabled = true; $("say").hidden = true; $("status").textContent = "Running…"; const t0 = performance.now();
-  const mode = $("mode").value, lang = $("lang").value, ids = encode(`${lang}-${mode}: ${text}`);
+  const mode = $("mode").value, lang = $("lang").value;
+  const src = mode === "itn" && $("punct").checked ? await punctuate(text, lang) : text;
+  const ids = encode(`${lang}-${mode}: ${src}`);
   const input_ids = new Tensor("int64", BigInt64Array.from(ids.map(BigInt)), [1, ids.length]);
   const attention_mask = new Tensor("int64", BigInt64Array.from(ids.map(() => 1n)), [1, ids.length]);
   const out = await model.generate({ input_ids, attention_mask, max_new_tokens: MODES[mode].maxNew(ids.length) });
@@ -96,6 +116,7 @@ async function load() {  // each mode's model is downloaded the first time that 
   const mode = $("mode").value; model = null; $("go").disabled = true; $("go").textContent = "Loading model…"; $("out").textContent = ""; $("say").hidden = true;
   try {
     models[mode] ??= await AutoModelForSeq2SeqLM.from_pretrained(MODES[mode].repo, { dtype: "q8", progress_callback: progress });
+    if ($("mode").value !== mode) return;  // the user switched modes while this model was downloading
     model = models[mode]; $("go").textContent = mode === "tn" ? "Normalize" : "Convert"; await run();
   } catch (err) { $("status").textContent = "Could not load the model: " + err.message; }
 }
