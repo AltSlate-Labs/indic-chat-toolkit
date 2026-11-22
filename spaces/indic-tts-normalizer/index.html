@@ -28,14 +28,14 @@ h2 { font-size:1rem; margin:16px 0 6px; }
 </head>
 <body>
 <main>
-<h1>Indic TTS normalizer</h1>
-<p>Paste text with numbers and get the words a text-to-speech voice should say: ₹ amounts, times, dates, years, percentages, decimals, phone numbers, units, ordinals, ranges and cricket scores, in Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi and Urdu.</p>
-<p>Model: <a href="https://huggingface.co/altslate/indic-tts-normalizer-small">altslate/indic-tts-normalizer-small</a> (300M, Apache-2.0), run in your browser with int8 weights. Your text never leaves your device. The first run downloads about 300 MB; after that a sentence takes a few seconds (the output is written byte by byte). It reads one pattern per format (for example 12/03/2024 is always day/month/year) and was not checked by native speakers; see the model card for results and limitations.</p>
+<h1>Indic TTS normalizer and ITN</h1>
+<p><b>Text → spoken</b> (for text-to-speech): paste text with numbers and get the words a voice should say: ₹ amounts, times, dates, years, percentages, decimals, phone numbers, units, ordinals, ranges and cricket scores, in Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi and Urdu. <b>Spoken → text</b> (for speech-recognition output) does the reverse: number words become digits, ₹ amounts, times and dates.</p>
+<p>Models: <a href="https://huggingface.co/altslate/indic-tts-normalizer-small">altslate/indic-tts-normalizer-small</a> and <a href="https://huggingface.co/altslate/indic-itn-small">altslate/indic-itn-small</a> (300M each, Apache-2.0), run in your browser with int8 weights. Your text never leaves your device. Each mode downloads about 300 MB the first time it is used; after that a sentence takes a few seconds (the output is written byte by byte). It reads one pattern per format (for example 12/03/2024 is always day/month/year) and was not checked by native speakers; see the model card for results and limitations.</p>
 <div class="ex" id="ex"></div>
-<div class="row"><label for="lang">Language</label> <select id="lang"></select></div>
+<div class="row"><label for="mode">Mode</label> <select id="mode"><option value="tn">Text → spoken (TTS)</option><option value="itn">Spoken → text (ITN)</option></select> <label for="lang" style="margin-left:12px">Language</label> <select id="lang"></select></div>
 <textarea id="inp" aria-label="Text to normalize" style="margin-top:10px"></textarea>
 <button id="go" disabled>Loading model…</button> <span id="status"></span>
-<h2>Spoken form</h2><div class="box" id="out"></div>
+<h2 id="outh">Spoken form</h2><div class="box" id="out"></div>
 <button id="say" hidden>Listen (your browser's voice)</button>
 </main>
 <script type="module">
@@ -55,12 +55,25 @@ const EX = [
   ["ml", "സ്വർണവില ഗ്രാമിന് ₹7,150 ആയി, ഇന്നലെ ₹7,080 ആയിരുന്നു."],
   ["pa", "ਕਣਕ ਦਾ ਭਾਅ ₹2,275 ਪ੍ਰਤੀ ਕੁਇੰਟਲ ਹੈ, ਪਿਛਲੇ ਸਾਲ ਨਾਲੋਂ 7% ਵੱਧ।"],
   ["ur", "میرا نمبر 98765 43210 ہے، شام 7 بجے کال کریں۔"]];
+const EX_ITN = [
+  ["hi", "बिल एक हज़ार दो सौ पचास रुपये और पचास पैसे है"],
+  ["hi", "ट्रेन सुबह आठ बजकर पंद्रह मिनट पर प्लेटफॉर्म तीन से जाएगी"],
+  ["hi", "पेट्रोल दो दशमलव पाँच प्रतिशत महंगा हुआ"],
+  ["ta", "என் நம்பர் ஒன்பது எட்டு ஏழு ஆறு ஐந்து நான்கு மூன்று இரண்டு ஒன்று பூஜ்ஜியம், மாலை ஆறு மணிக்கு அழைக்கவும்"],
+  ["gu", "બે હજાર અગિયારના વર્ષમાં ભારત સરકાર તરફથી પદ્મશ્રી વડે સન્માનિત કરવામાં આવ્યા હતા."],
+  ["kn", "ಹಂಚಿಕೆಯಾದ ಒಟ್ಟು ನೂರ ಎಪ್ಪತ್ತಮೂರು ಟಿಎಂಸಿ ಪೂರ್ಣ ಪ್ರಮಾಣದ ನೀರನ್ನು ಬಲಸಿಕೊಳ್ಳಲಾಗುತ್ತಿದೆ."]];
+const MODES = { tn: { repo: "altslate/indic-tts-normalizer-small", ex: EX, head: "Spoken form", maxNew: (n) => Math.min(2048, 4 * n + 64) },
+               itn: { repo: "altslate/indic-itn-small", ex: EX_ITN, head: "Written form", maxNew: (n) => n + 64 } };
 const $ = (id) => document.getElementById(id);
 for (const [k, v] of Object.entries(LANGS)) { const o = document.createElement("option"); o.value = k; o.textContent = v; $("lang").appendChild(o); }
-let model = null;
-for (const [l, t] of EX) { const b = document.createElement("button"); b.textContent = `${LANGS[l]}: ${t.length > 22 ? t.slice(0, 20) + "…" : t}`;
-  b.onclick = () => { $("inp").value = t; $("lang").value = l; if (model) run(); }; $("ex").appendChild(b); }
-$("inp").value = EX[0][1]; $("lang").value = EX[0][0];
+const models = {}; let model = null;
+function showExamples() {
+  const M = MODES[$("mode").value]; $("ex").replaceChildren(); $("outh").textContent = M.head;
+  for (const [l, t] of M.ex) { const b = document.createElement("button"); b.textContent = `${LANGS[l]}: ${t.length > 22 ? t.slice(0, 20) + "…" : t}`;
+    b.onclick = () => { $("inp").value = t; $("lang").value = l; if (model) run(); }; $("ex").appendChild(b); }
+  $("inp").value = M.ex[0][1]; $("lang").value = M.ex[0][0];
+}
+showExamples();
 const voiceFor = (l) => (window.speechSynthesis ? speechSynthesis.getVoices().find((v) => v.lang.toLowerCase().startsWith(l)) : null);
 const seen = {};
 const progress = (p) => { if (p.status === "progress" && p.total) { seen[p.file] = [p.loaded, p.total];
@@ -69,22 +82,27 @@ const progress = (p) => { if (p.status === "progress" && p.total) { seen[p.file]
 async function run() {
   const text = $("inp").value.trim(); if (!text) return;
   $("go").disabled = true; $("say").hidden = true; $("status").textContent = "Running…"; const t0 = performance.now();
-  const lang = $("lang").value, ids = encode(`${lang}-tn: ${text}`);
+  const mode = $("mode").value, lang = $("lang").value, ids = encode(`${lang}-${mode}: ${text}`);
   const input_ids = new Tensor("int64", BigInt64Array.from(ids.map(BigInt)), [1, ids.length]);
   const attention_mask = new Tensor("int64", BigInt64Array.from(ids.map(() => 1n)), [1, ids.length]);
-  const out = await model.generate({ input_ids, attention_mask, max_new_tokens: Math.min(2048, 4 * ids.length + 64) });
+  const out = await model.generate({ input_ids, attention_mask, max_new_tokens: MODES[mode].maxNew(ids.length) });
   $("out").textContent = decode(out.tolist()[0].map(Number));
   $("status").textContent = `${Math.round(performance.now() - t0)} ms`; $("go").disabled = false;
-  $("say").hidden = !voiceFor(lang);
+  $("say").hidden = mode !== "tn" || !voiceFor(lang);
 }
-if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => { if ($("out").textContent) $("say").hidden = !voiceFor($("lang").value); };  // voices load asynchronously
+if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => { if ($("out").textContent && $("mode").value === "tn") $("say").hidden = !voiceFor($("lang").value); };  // voices load asynchronously
 $("say").onclick = () => { const u = new SpeechSynthesisUtterance($("out").textContent); u.voice = voiceFor($("lang").value); u.lang = u.voice.lang; speechSynthesis.speak(u); };
-try {
-  model = await AutoModelForSeq2SeqLM.from_pretrained("altslate/indic-tts-normalizer-small", { dtype: "q8", progress_callback: progress });
-  $("go").textContent = "Normalize"; $("go").onclick = run;
-  $("inp").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) run(); });
-  await run();
-} catch (err) { $("status").textContent = "Could not load the model: " + err.message; }
+async function load() {  // each mode's model is downloaded the first time that mode is used
+  const mode = $("mode").value; model = null; $("go").disabled = true; $("go").textContent = "Loading model…"; $("out").textContent = ""; $("say").hidden = true;
+  try {
+    models[mode] ??= await AutoModelForSeq2SeqLM.from_pretrained(MODES[mode].repo, { dtype: "q8", progress_callback: progress });
+    model = models[mode]; $("go").textContent = mode === "tn" ? "Normalize" : "Convert"; await run();
+  } catch (err) { $("status").textContent = "Could not load the model: " + err.message; }
+}
+$("go").onclick = run;
+$("inp").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && model) run(); });
+$("mode").onchange = () => { showExamples(); load(); };
+await load();
 </script>
 </body>
 </html>
