@@ -25,6 +25,10 @@ h2 { font-size:1rem; margin:16px 0 6px; }
 .fill { background:var(--accent); height:100%; }
 .num { text-align:right; font-variant-numeric: tabular-nums; color:var(--muted); }
 #top { font-size:1.3rem; font-weight:600; margin:4px 0 8px; }
+#words { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
+.w { border-radius:6px; padding:2px 8px 3px; border:1px solid var(--line); background:var(--card); line-height:1.3; }
+.w b { display:block; font-size:.7rem; font-weight:600; letter-spacing:.02em; }
+#sum { color:var(--muted); font-size:.95rem; }
 @media (max-width: 480px) { .row { grid-template-columns: 8rem 1fr 3rem; } }
 </style>
 </head>
@@ -35,15 +39,17 @@ h2 { font-size:1rem; margin:16px 0 6px; }
 <p>Model: <a href="https://huggingface.co/altslate/indic-chat-lid-small">altslate/indic-chat-lid-small</a> (140M, Apache-2.0), run in your browser. Your text never leaves your device. The first run downloads about 180 MB (model and tokenizer), which is then cached. Romanized Hindi and Urdu are often the same text, and other Indic languages (Assamese, Konkani, Nepali…) may be labelled as a neighbour; see the model card.</p>
 <div class="ex" id="ex"></div>
 <textarea id="inp" aria-label="Message"></textarea>
-<button id="go" disabled>Loading model…</button> <span id="status"></span>
+<button id="go" disabled>Loading model…</button> <label style="margin-left:10px"><input type="checkbox" id="perword"> Per word (code-mixed messages)</label> <span id="status"></span>
 <h2>Prediction</h2><div id="top"></div><div id="bars"></div>
+<div id="pw" hidden><h2>Per word</h2><div id="words"></div><div id="sum"></div>
+<p style="font-size:.85rem">Word-level model: <a href="https://huggingface.co/altslate/indic-chat-wordlid-small">altslate/indic-chat-wordlid-small</a> (140M, int8, about 140 MB on first use). Romanized Hindi and Urdu share most words, so the summary counts them together.</p></div>
 </main>
 <script type="module">
-import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
+import { pipeline, AutoTokenizer, AutoModelForTokenClassification } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
 const NAMES = { hi:"Hindi", bn:"Bengali", ta:"Tamil", te:"Telugu", mr:"Marathi", gu:"Gujarati", kn:"Kannada", ml:"Malayalam",
   pa:"Punjabi", ur:"Urdu", sd:"Sindhi", si:"Sinhala", en:"English", other:"Other" };
 const name = (l) => { const [c, s] = l.split("-"); return NAMES[c] + (s ? " (romanized)" : c === "en" || c === "other" ? "" : " (native script)"); };
-const EX = ["kal mere interview tha, bahut nervous tha yaar", "tuition-e jabe ki bhabcho?", "naan naalaikku varen, nee ready-a iru",
+const EX = ["repu chinemaki velli akkada minverva mein coffee peene jaate hain", "मुझे कल office जाना है, meeting cancel हो गई", "kal mere interview tha, bahut nervous tha yaar", "tuition-e jabe ki bhabcho?", "naan naalaikku varen, nee ready-a iru",
   "ninna bike puncture aaytu, nale sari madsona", "ente phone charge theernnu, pinne vilikkam", "tusi kithe ho? main ghar aa gaya",
   "aaje sanje maline javanu che", "నేను రేపు వస్తాను", "আজ সন্ধ্যায় বৃষ্টি হতে পারে।", "see you at the station at 6"];
 const $ = (id) => document.getElementById(id);
@@ -57,14 +63,36 @@ async function run() {
   const out = await clf(text, { top_k: 5 });
   $("top").textContent = name(out[0].label) + " · " + out[0].label;
   $("bars").innerHTML = out.map((o) => `<div class="row"><span>${name(o.label)}</span><div class="track"><div class="fill" style="width:${(o.score * 100).toFixed(1)}%"></div></div><span class="num">${(o.score * 100).toFixed(0)}%</span></div>`).join("");
+  if ($("perword").checked) await perWord(text);
   $("status").textContent = `${Math.round(performance.now() - t0)} ms`; $("go").disabled = false;
 }
+const HUE = { hi:20, bn:200, ta:120, te:280, mr:45, gu:330, kn:160, ml:240, pa:0, ur:90, sd:180, si:300, en:215, other:0 };
+let wtok = null, wmodel = null;
+async function perWord(text) {
+  if (!wmodel) { $("status").textContent = "Loading word-level model…";
+    wtok = await AutoTokenizer.from_pretrained("altslate/indic-chat-wordlid-small");
+    wmodel = await AutoModelForTokenClassification.from_pretrained("altslate/indic-chat-wordlid-small", { dtype: "q8", progress_callback: progress }); }
+  const enc = await wtok(text); const { logits } = await wmodel(enc);
+  const toks = ["<bos>", ...wtok.tokenize(text), "<eos>"]; const [, T, C] = logits.dims; const out = [];
+  for (let t = 1; t < T - 1; t++) {
+    if (toks[t].startsWith("▁") || out.length === 0) { let b = 0; for (let c = 1; c < C; c++) if (logits.data[t * C + c] > logits.data[t * C + b]) b = c;
+      out.push({ w: toks[t].replace(/^▁/, ""), l: wmodel.config.id2label[b] }); } else out[out.length - 1].w += toks[t];
+  }
+  $("words").replaceChildren(...out.map(({ w, l }) => { const d = document.createElement("span"); d.className = "w";
+    if (l !== "other") d.style.borderColor = d.style.color = `hsl(${HUE[l]} 60% 45%)`;
+    const b = document.createElement("b"); b.textContent = l; d.append(b, w); return d; }));
+  const cnt = {}; for (const { w, l } of out) { if (l === "other") continue; const k = (l === "hi" || l === "ur") && /^[\x00-\x7F]*$/.test(w) ? "hi/ur" : l; cnt[k] = (cnt[k] || 0) + 1; }
+  const n = Object.values(cnt).reduce((a, b) => a + b, 0) || 1;
+  $("sum").textContent = Object.entries(cnt).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k === "hi/ur" ? "Hindi/Urdu (romanized)" : NAMES[k]} ${Math.round(100 * v / n)}%`).join(" · ");
+  $("pw").hidden = false;
+}
+$("perword").onchange = () => { if (!$("perword").checked) $("pw").hidden = true; else if (clf) run(); };
 const seen = {};
+function progress(p) { if (p.status === "progress" && p.total) { seen[p.file] = [p.loaded, p.total];
+  const [l, t] = Object.values(seen).reduce((a, [x, y]) => [a[0] + x, a[1] + y], [0, 0]);
+  $("status").textContent = `Downloading model… ${Math.round(l / 1e6)} / ${Math.round(t / 1e6)} MB`; } }
 try {
-  clf = await pipeline("text-classification", "altslate/indic-chat-lid-small", { dtype: "q8",
-    progress_callback: (p) => { if (p.status === "progress" && p.total) { seen[p.file] = [p.loaded, p.total];
-      const [l, t] = Object.values(seen).reduce((a, [x, y]) => [a[0] + x, a[1] + y], [0, 0]);
-      $("status").textContent = `Downloading model… ${Math.round(l / 1e6)} / ${Math.round(t / 1e6)} MB`; } } });
+  clf = await pipeline("text-classification", "altslate/indic-chat-lid-small", { dtype: "q8", progress_callback: progress });
   $("go").textContent = "Detect"; $("go").onclick = run;
   $("inp").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) run(); });
   await run();

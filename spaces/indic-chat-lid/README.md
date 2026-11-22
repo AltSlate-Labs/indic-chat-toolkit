@@ -8,6 +8,7 @@ app_file: index.html
 license: apache-2.0
 models:
 - altslate/indic-chat-lid-small
+- altslate/indic-chat-wordlid-small
 short_description: Detect 12 South Asian languages, native or romanized
 ---
 
