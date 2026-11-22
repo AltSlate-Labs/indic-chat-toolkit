@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Indic TTS Normalizer</title>
+<style>
+:root { --bg:#fafaf9; --fg:#1c1917; --muted:#57534e; --card:#ffffff; --line:#e7e5e4; --accent:#4338ca; }
+@media (prefers-color-scheme: dark) { :root { --bg:#1c1917; --fg:#f5f5f4; --muted:#a8a29e; --card:#292524; --line:#44403c; --accent:#a5b4fc; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, -apple-system, "Segoe UI", "Noto Sans", sans-serif; }
+main { max-width: 820px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 1.6rem; margin: 0 0 8px; }
+p { color: var(--muted); margin: 0 0 12px; }
+a { color: var(--accent); }
+textarea, select { width:100%; padding:12px; font:inherit; color:var(--fg); background:var(--card); border:1px solid var(--line); border-radius:8px; }
+textarea { min-height:100px; resize:vertical; }
+select { width:auto; padding:6px 10px; }
+button { font:inherit; padding:8px 18px; border-radius:8px; border:0; background:var(--accent); color:var(--bg); cursor:pointer; margin:10px 0; }
+button:disabled { opacity:.5; cursor:default; }
+.ex { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 16px; }
+.ex button { background:transparent; color:var(--fg); border:1px solid var(--line); padding:4px 10px; margin:0; font-size:.85rem; }
+.box { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; min-height:56px; white-space:pre-wrap; word-break:break-word; font-size:1.25rem; }
+.row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+#status, #det { font-size:.9rem; color:var(--muted); }
+h2 { font-size:1rem; margin:16px 0 6px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Indic TTS normalizer</h1>
+<p>Paste text with numbers and get the words a text-to-speech voice should say: ₹ amounts, times, dates, years, percentages, decimals, phone numbers, units, ordinals, ranges and cricket scores, in Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi and Urdu.</p>
+<p>Model: <a href="https://huggingface.co/altslate/indic-tts-normalizer-small">altslate/indic-tts-normalizer-small</a> (300M, Apache-2.0), run in your browser with int8 weights. Your text never leaves your device. The first run downloads about 300 MB; after that a sentence takes a few seconds (the output is written byte by byte). It reads one pattern per format (for example 12/03/2024 is always day/month/year) and was not checked by native speakers; see the model card for results and limitations.</p>
+<div class="ex" id="ex"></div>
+<div class="row"><label for="lang">Language</label> <select id="lang"></select></div>
+<textarea id="inp" aria-label="Text to normalize" style="margin-top:10px"></textarea>
+<button id="go" disabled>Loading model…</button> <span id="status"></span>
+<h2>Spoken form</h2><div class="box" id="out"></div>
+<button id="say" hidden>Listen (your browser's voice)</button>
+</main>
+<script type="module">
+import { AutoModelForSeq2SeqLM, Tensor } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
+// ByT5 has no tokenizer.json: its tokenizer is just UTF-8 bytes + 3, with </s> = 1.
+const encode = (s) => [...new TextEncoder().encode(s)].map((b) => b + 3).concat([1]);
+const decode = (ids) => new TextDecoder().decode(new Uint8Array(ids.filter((i) => i >= 3).map((i) => i - 3)));
+const LANGS = { hi:"Hindi", bn:"Bengali", ta:"Tamil", te:"Telugu", mr:"Marathi", gu:"Gujarati", kn:"Kannada", ml:"Malayalam", pa:"Punjabi", ur:"Urdu" };
+const EX = [
+  ["hi", "बिल ₹1,250.50 है, कल 4:30 PM तक जमा करें।"],
+  ["bn", "দাম ছিল ₹450, এখন 20% ছাড়ে ₹360।"],
+  ["ta", "வெப்பநிலை 38°C வரை உயரும், 2 நாட்களுக்கு மழை இல்லை."],
+  ["te", "ఈ ఫోన్ ధర ₹15,999, 128 GB మెమరీతో వస్తుంది."],
+  ["mr", "पेट्रोल 2.5% ने महाग झाले, आता 106.31 रुपये लिटर."],
+  ["gu", "મારો નંબર 98250 12345 છે, 5 વાગ્યા પછી ફોન કરજો."],
+  ["kn", "ಬೆಂಗಳೂರಿನಿಂದ ಮೈಸೂರಿಗೆ 145 km, ಬಸ್ ಟಿಕೆಟ್ ₹210."],
+  ["ml", "സ്വർണവില ഗ്രാമിന് ₹7,150 ആയി, ഇന്നലെ ₹7,080 ആയിരുന്നു."],
+  ["pa", "ਕਣਕ ਦਾ ਭਾਅ ₹2,275 ਪ੍ਰਤੀ ਕੁਇੰਟਲ ਹੈ, ਪਿਛਲੇ ਸਾਲ ਨਾਲੋਂ 7% ਵੱਧ।"],
+  ["ur", "میرا نمبر 98765 43210 ہے، شام 7 بجے کال کریں۔"]];
+const $ = (id) => document.getElementById(id);
+for (const [k, v] of Object.entries(LANGS)) { const o = document.createElement("option"); o.value = k; o.textContent = v; $("lang").appendChild(o); }
+let model = null;
+for (const [l, t] of EX) { const b = document.createElement("button"); b.textContent = `${LANGS[l]}: ${t.length > 22 ? t.slice(0, 20) + "…" : t}`;
+  b.onclick = () => { $("inp").value = t; $("lang").value = l; if (model) run(); }; $("ex").appendChild(b); }
+$("inp").value = EX[0][1]; $("lang").value = EX[0][0];
+const voiceFor = (l) => (window.speechSynthesis ? speechSynthesis.getVoices().find((v) => v.lang.toLowerCase().startsWith(l)) : null);
+const seen = {};
+const progress = (p) => { if (p.status === "progress" && p.total) { seen[p.file] = [p.loaded, p.total];
+  const [l, t] = Object.values(seen).reduce((a, [x, y]) => [a[0] + x, a[1] + y], [0, 0]);
+  $("status").textContent = `Downloading model… ${Math.round(l / 1e6)} / ${Math.round(t / 1e6)} MB`; } };
+async function run() {
+  const text = $("inp").value.trim(); if (!text) return;
+  $("go").disabled = true; $("say").hidden = true; $("status").textContent = "Running…"; const t0 = performance.now();
+  const lang = $("lang").value, ids = encode(`${lang}-tn: ${text}`);
+  const input_ids = new Tensor("int64", BigInt64Array.from(ids.map(BigInt)), [1, ids.length]);
+  const attention_mask = new Tensor("int64", BigInt64Array.from(ids.map(() => 1n)), [1, ids.length]);
+  const out = await model.generate({ input_ids, attention_mask, max_new_tokens: Math.min(2048, 4 * ids.length + 64) });
+  $("out").textContent = decode(out.tolist()[0].map(Number));
+  $("status").textContent = `${Math.round(performance.now() - t0)} ms`; $("go").disabled = false;
+  $("say").hidden = !voiceFor(lang);
+}
+if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => { if ($("out").textContent) $("say").hidden = !voiceFor($("lang").value); };  // voices load asynchronously
+$("say").onclick = () => { const u = new SpeechSynthesisUtterance($("out").textContent); u.voice = voiceFor($("lang").value); u.lang = u.voice.lang; speechSynthesis.speak(u); };
+try {
+  model = await AutoModelForSeq2SeqLM.from_pretrained("altslate/indic-tts-normalizer-small", { dtype: "q8", progress_callback: progress });
+  $("go").textContent = "Normalize"; $("go").onclick = run;
+  $("inp").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) run(); });
+  await run();
+} catch (err) { $("status").textContent = "Could not load the model: " + err.message; }
+</script>
+</body>
+</html>
