@@ -63,8 +63,8 @@ const EX_ITN = [
   ["gu", "બે હજાર અગિયારના વર્ષમાં ભારત સરકાર તરફથી પદ્મશ્રી વડે સન્માનિત કરવામાં આવ્યા હતા."],
   ["kn", "ಹಂಚಿಕೆಯಾದ ಒಟ್ಟು ನೂರ ಎಪ್ಪತ್ತಮೂರು ಟಿಎಂಸಿ ಪೂರ್ಣ ಪ್ರಮಾಣದ ನೀರನ್ನು ಬಲಸಿಕೊಳ್ಳಲಾಗುತ್ತಿದೆ."],
   ["hi", "मेरा बिल एक हज़ार दो सौ पचास रुपये आया है क्या आप कल चार बजकर तीस मिनट तक जमा कर सकते हैं"]];  // unpunctuated, as ASR writes it
-const MODES = { tn: { repo: "altslate/indic-tts-normalizer-small", ex: EX, head: "Spoken form", maxNew: (n) => Math.min(2048, 4 * n + 64) },
-               itn: { repo: "altslate/indic-itn-small", ex: EX_ITN, head: "Written form", maxNew: (n) => n + 64 } };
+const MODES = { tn: { repo: "altslate/indic-tts-normalizer-small", rev: "c277d6c223e6d4a6cc1dfead8543ff9b318b3eb7", ex: EX, head: "Spoken form", maxNew: (n) => Math.min(2048, 4 * n + 64) },
+               itn: { repo: "altslate/indic-itn-small", rev: "1a8df0b5092cfd94b7b61170f02970eed39f4600", ex: EX_ITN, head: "Written form", maxNew: (n) => n + 64 } };
 const $ = (id) => document.getElementById(id);
 for (const [k, v] of Object.entries(LANGS)) { const o = document.createElement("option"); o.value = k; o.textContent = v; $("lang").appendChild(o); }
 const models = {}; let model = null;
@@ -115,7 +115,7 @@ $("say").onclick = () => { const u = new SpeechSynthesisUtterance($("out").textC
 async function load() {  // each mode's model is downloaded the first time that mode is used
   const mode = $("mode").value; model = null; $("go").disabled = true; $("go").textContent = "Loading model…"; $("out").textContent = ""; $("say").hidden = true;
   try {
-    models[mode] ??= await AutoModelForSeq2SeqLM.from_pretrained(MODES[mode].repo, { dtype: "q8", progress_callback: progress });
+    models[mode] ??= await AutoModelForSeq2SeqLM.from_pretrained(MODES[mode].repo, { revision: MODES[mode].rev, dtype: "q8", progress_callback: progress });  // pinned: browsers cache by URL, so a new model release needs a new revision here
     if ($("mode").value !== mode) return;  // the user switched modes while this model was downloading
     model = models[mode]; $("go").textContent = mode === "tn" ? "Normalize" : "Convert"; await run();
   } catch (err) { $("status").textContent = "Could not load the model: " + err.message; }
