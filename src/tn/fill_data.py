@@ -10,12 +10,12 @@ from lex_hand import LEX, ordinal, W
 import unicodedata
 nfc = lambda x: {k: unicodedata.normalize("NFC", v) if isinstance(v, str) else v for k, v in x.items()}  # indic-numtowords writes te ై decomposed (U+0C46 U+0C56)
 CLDR_UNITS = {"percent": "concentr-percent", "km": "length-kilometer", "m": "length-meter", "cm": "length-centimeter",
-  "kg": "mass-kilogram", "g": "mass-gram", "l": "volume-liter", "ml": "volume-milliliter", "C": "temperature-celsius",
+  "mm": "length-millimeter", "kg": "mass-kilogram", "g": "mass-gram", "l": "volume-liter", "ml": "volume-milliliter", "C": "temperature-celsius",
   "GB": "digital-gigabyte", "MB": "digital-megabyte", "hour": "duration-hour", "minute": "duration-minute"}
 LANGS = ["hi", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "ur"]
 DIG0 = {"hi": 0x966, "mr": 0x966, "bn": 0x9E6, "pa": 0xA66, "gu": 0xAE6, "ta": 0xBE6, "te": 0xC66, "kn": 0xCE6, "ml": 0xD66, "ur": 0x6F0}
 D = os.path.expanduser("~/Downloads/data/dakshina/dakshina_dataset_v1.0/")
-UNIT_ABBR = {"km": ["km", "KM"], "m": ["m"], "cm": ["cm"], "kg": ["kg", "KG"], "g": ["g", "gm"], "l": ["L", "l", "ltr"], "ml": ["ml", "mL"],
+UNIT_ABBR = {"km": ["km", "KM"], "m": ["m"], "cm": ["cm"], "mm": ["mm"], "kg": ["kg", "KG"], "g": ["g", "gm"], "l": ["L", "l", "ltr"], "ml": ["ml", "mL"],
              "C": ["°C", "° C"], "GB": ["GB"], "MB": ["MB"], "hour": ["hr", "hrs", "h"], "minute": ["min", "mins"]}
 
 
@@ -48,6 +48,16 @@ def good_carrier(c):
     return True
 
 
+# v6: unit names CLDR lacks for these locales (tn-v5 audit: Urdu "km" read as kilogram because Urdu km was never in training)
+UNIT_FIX = {"bn": {"l": "{0} লিটার", "hour": "{0} ঘণ্টা", "minute": "{0} মিনিট", "mm": "{0} মিলিমিটার"},
+            "gu": {"ml": "{0} મિલીલીટર", "hour": "{0} કલાક", "minute": "{0} મિનિટ", "mm": "{0} મિલીમીટર"},
+            "ml": {"percent": "{0} ശതമാനം", "g": "{0} ഗ്രാം", "mm": "{0} മില്ലിമീറ്റർ"},
+            "ur": {"km": "{0} کلومیٹر", "m": "{0} میٹر", "cm": "{0} سینٹی میٹر", "l": "{0} لیٹر", "hour": "{0} گھنٹے", "minute": "{0} منٹ",
+                   "mm": "{0} ملی میٹر"},
+            "hi": {"mm": "{0} मिलीमीटर"}, "mr": {"mm": "{0} मिलिमीटर"}, "pa": {"mm": "{0} ਮਿਲੀਮੀਟਰ"}, "ta": {"mm": "{0} மில்லிமீட்டர்கள்"},
+            "te": {"mm": "{0} మిల్లీమీటర్లు"}, "kn": {"mm": "{0} ಮಿಲಿಮೀಟರ್‌ಗಳು"}}
+
+
 class Lang:
     def __init__(s, lang):
         loc = Locale.parse(lang); up = loc._data["unit_patterns"]
@@ -56,7 +66,7 @@ class Lang:
             except Exception: return None
         s.l, s.r = lang, random.Random()
         s.x = {**LEX[lang], "zero": W(0, lang), "months": [loc.months["format"]["wide"][i] for i in range(1, 13)],
-               "units": {k: unit(v) for k, v in CLDR_UNITS.items()}}
+               "units": {k: unit(v) or UNIT_FIX.get(lang, {}).get(k) for k, v in CLDR_UNITS.items()}}
 
     def digits(s, t):  # 20% native digits where the language uses them in print
         if s.l in ("ta", "ml", "te", "kn") or s.r.random() > 0.2: return t
@@ -192,6 +202,9 @@ def combine(rows, n, k, seed):
     return out
 
 
+ZERO_AS_LETTER = {"kn": (re.compile("(?<=[\u0C80-\u0CE5])\u0CE6"), "\u0C82"), "ml": (re.compile("(?<=[\u0D00-\u0D65])\u0D66"), "\u0D02")}
+
+
 def wiki(L, k_num, k_id):
     """Dakshina TRAIN split only. v2: any integer up to 7 digits, incl. years (read in the language's year style when 4 digits,
     1100-1999), numbers glued to suffixes (500க்கும், ১টি) and number-number ranges (1859-1941); the suffix/hyphen is kept as written."""
@@ -206,7 +219,9 @@ def wiki(L, k_num, k_id):
             if not re.search(r"\d", t):
                 if len(ident) < k_id: ident.append({"src": f"{lang}-tn: {t}", "tgt": t, "lang": lang, "kind": "IDENTITY", "itn": t})
             elif len(num) < k_num and not WIKI_BAD.search(t):
-                num.append({"src": f"{lang}-tn: {t}", "tgt": re.sub(r"\d+", rep, t), "lang": lang, "kind": "WIKI",
+                # v6: kn/ml text often types the native zero for the anusvara inside a word (ರೆ೦ಟೆ, ನ೦ಬಿಕೆ); tn-v5 read it as "zero"
+                tt = ZERO_AS_LETTER[lang][0].sub(ZERO_AS_LETTER[lang][1], t) if lang in ZERO_AS_LETTER else t
+                num.append({"src": f"{lang}-tn: {t}", "tgt": re.sub(r"\d+", rep, tt), "lang": lang, "kind": "WIKI",
                             "itn": re.sub(r"\d", lambda m: str(int(m.group(0))), t)})  # ITN target: native digits -> ASCII
             if len(num) >= k_num and len(ident) >= k_id: break
     return num + ident

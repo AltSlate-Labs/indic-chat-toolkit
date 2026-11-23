@@ -109,7 +109,14 @@ EN = lambda v: "th" if 10 <= v % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(
 
 def ordinal(lang, v, r: random.Random):
     """-> (written, spoken) or None. Written = digits + native suffix (or English suffix), spoken agrees with the suffix."""
-    if v in IRR.get(lang, {}): suf, sp = r.choice(IRR[lang][v]); return f"{v}{suf}", sp
+    if v in IRR.get(lang, {}):
+        k = r.randrange(len(IRR[lang][v])); suf, sp = IRR[lang][v][k]
+        # v6: real text also writes irregular ordinals with the regular suffix (1ਵੀਂ, 1ویں, 3वीं) or English (1st, 3rd); tn-v5 garbled
+        # these (ਪਹਿਵੀਂ, پہلیں). REG and IRR lists share gender order (m, f, oblique), so the same index keeps the gender.
+        x = r.random()
+        if x < 0.25 and len(REG.get(lang, [])) == len(IRR[lang][v]) and lang in ("hi", "mr", "gu", "pa", "ur"): suf = REG[lang][k][0]
+        elif x < 0.4 and lang not in ("ur",): suf = EN(v)
+        return f"{v}{suf}", sp
     if lang == "bn" and v <= 10: return None
     suf, f = r.choice(REG[lang]); sp = f(W(v, lang))
     if not sp: return None
