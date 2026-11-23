@@ -102,8 +102,7 @@ async function run() {
   $("go").disabled = true; $("say").hidden = true; $("status").textContent = "Running…"; const t0 = performance.now();
   const mode = $("mode").value, lang = $("lang").value;
   const src = mode === "itn" && $("punct").checked ? await punctuate(text, lang) : text;
-  // models trained on Telugu ై written as U+0C46 U+0C56 (number-word source): ITN input in that form, TN output back to NFC
-  const ids = encode(`${lang}-${mode}: ${mode === "itn" && lang === "te" ? src.normalize("NFD") : src}`);
+  const ids = encode(`${lang}-${mode}: ${src.normalize("NFC")}`);  // models expect NFC (tn-v5 / itn-v3)
   const input_ids = new Tensor("int64", BigInt64Array.from(ids.map(BigInt)), [1, ids.length]);
   const attention_mask = new Tensor("int64", BigInt64Array.from(ids.map(() => 1n)), [1, ids.length]);
   const out = await model.generate({ input_ids, attention_mask, max_new_tokens: MODES[mode].maxNew(ids.length) });
