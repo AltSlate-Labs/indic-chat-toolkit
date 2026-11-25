@@ -7,7 +7,7 @@ import argparse, json, os, random, time, numpy as np, torch
 from transformers import AutoTokenizer, AutoModel
 p = argparse.ArgumentParser()
 for a, d in [("--data", None), ("--base", None), ("--out", None), ("--epochs", 1.0), ("--bs", 128), ("--lr", 5e-5), ("--max_steps", 0),
-             ("--ckpt_every", 2000), ("--max_len", 128), ("--mse_w", 1.0), ("--nce_w", 1.0), ("--init_head", "")]:
+             ("--ckpt_every", 2000), ("--max_len", 128), ("--mse_w", 1.0), ("--nce_w", 1.0), ("--init_head", ""), ("--chunk_steps", 0)]:
     p.add_argument(a, type=type(d) if d is not None else str, default=d)
 A = p.parse_args(); os.makedirs(A.out, exist_ok=True)
 torch.manual_seed(0); random.seed(0)
@@ -49,7 +49,8 @@ def dev_eval():
     enc.train(); head.train(); return torch.cat(cos).mean().item()
 print(f"train {len(train)} dev {len(dev)} steps {steps} bs {A.bs}", flush=True)
 t0 = time.time(); enc.train()
-while step < steps:
+stop = min(steps, step + A.chunk_steps) if A.chunk_steps else steps   # chunked runs: stop on a ckpt boundary, rerun to resume
+while step < stop:
     i0 = (step * A.bs) % len(train); rows = [train[order[(i0 + k) % len(train)]] for k in range(A.bs)]
     tid = torch.tensor([r[1] for r in rows], device="cuda")
     t = torch.tensor(np.stack([T[r[1]] for r in rows]), device="cuda").float()
@@ -65,6 +66,7 @@ while step < steps:
     if step % A.ckpt_every == 0 or step == steps:
         print(f"step {step} dev cos {dev_eval():.4f}", flush=True)
         torch.save({"enc": enc.state_dict(), "head": head.state_dict(), "opt": opt.state_dict(), "sched": sched.state_dict(), "step": step}, ck)
+if step < steps: print(f"chunk done at step {step}/{steps}; rerun to resume", flush=True); raise SystemExit(0)
 enc.save_pretrained(A.out); tok.save_pretrained(A.out); torch.save(head.state_dict(), f"{A.out}/head.pt")
 json.dump({"steps": steps, "bs": A.bs, "lr": A.lr, "data": A.data}, open(f"{A.out}/train_meta.json", "w"))
 print("saved", A.out)
