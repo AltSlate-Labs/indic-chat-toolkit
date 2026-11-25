@@ -10,7 +10,7 @@
 
 # Indic chat toolkit: training and evaluation code
 
-Code behind six small models for Indian-language text and a browser screenshot redactor: message-level and word-level language ID and transliteration for romanized and native-script chat in 12 South Asian languages (Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Sindhi, Sinhala), text normalization for speech in 10 of them, both directions (TTS input and ASR output), and punctuation restoration for ASR output.
+Code behind seven small models for Indian-language text and a browser screenshot redactor: message-level and word-level language ID and transliteration for romanized and native-script chat in 12 South Asian languages (Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Sindhi, Sinhala), text normalization for speech in 10 of them, both directions (TTS input and ASR output), punctuation restoration for ASR output, and sentence embeddings for native, romanized and code-mixed text.
 
 | Model | What it does | Size | Hub | Demo |
 |---|---|---|---|---|
@@ -20,6 +20,7 @@ Code behind six small models for Indian-language text and a browser screenshot r
 | [**indic-tts-normalizer-small**](https://huggingface.co/altslate/indic-tts-normalizer-small) | Written → spoken form for TTS (₹ amounts, times, dates, phone numbers, units, cricket scores…), 10 languages | 300M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-tts-normalizer-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-tts-normalizer-small) | [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/altslate/indic-tts-normalizer) |
 | [**indic-punctuation-base**](https://huggingface.co/altslate/indic-punctuation-base) | Punctuation restoration (comma, sentence end, question) for ASR output, 12 languages + English | 307M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-punctuation-base&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-punctuation-base) | – |
 | [**indic-itn-small**](https://huggingface.co/altslate/indic-itn-small) | Spoken → written for ASR output (numbers, ₹, times, dates → digits), 10 languages | 300M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-itn-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-itn-small) | [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/altslate/indic-tts-normalizer) |
+| [**indic-embed-small**](https://huggingface.co/altslate/indic-embed-small) | Sentence embeddings for native-script, romanized and code-mixed Indic text + English (10 languages); search native text with romanized queries | 140M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-embed-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-embed-small) | – |
 
 Results, data provenance and limitations are on the model cards. This repository is the code **as it was run** to build and test them: research scripts, not a library. It is published so the numbers on the cards can be checked and reproduced.
 
@@ -44,6 +45,7 @@ src/tn/      TTS normalization: carrier sentences, slot filling with exact spoke
 src/vision/  screenshot PII redaction: chat-screenshot renderer with exact PII boxes, PP-OCRv5 ONNX runner (numpy + Pillow), scorer
 src/punct/   punctuation restoration: data from punctuated text, 1-800-BAD-CODE baseline, F1 scorer, ONNX checks
 src/itn/     inverse text normalization: the TN data reversed with canonical written forms, real-sentence tests, digit-match scorer, baselines
+src/embed/   sentence embeddings: romanizer (dictionaries + rules), distillation data, teacher encoding, training, evaluation, sentence-transformers + ONNX packaging
 jobs/<id>/   the shell script for each GPU job, in the order they were run (see below)
 spaces/      the browser demos (static HTML + transformers.js; the models run in the browser)
 ```
@@ -95,6 +97,13 @@ spaces/      the browser demos (static HTML + transformers.js; the models run in
 2. `itn-v1`: 1 epoch on the reversed TN data. `itn-v2`: + 15k sentences with internal-zero numbers (`src/itn/zeros.py`; v1 turned 1024 into 124) mixed with 45k v1 rows; `queue.sh` waits for a free GPU.
 3. `itn-eval`: real-sentence tests (`src/itn/make_tests_real.py`): test A = Dakshina validation sentences spoken by rules; test B = LLM-written messages whose spoken form the judge accepts. Scored by digit match (`src/itn/score_itn.py`).
 
+**indic-embed-small (released version = `embed-v3`; each round fine-tunes the previous one)**
+
+1. `embed-probe`, `embed-eval`: baselines (l3cube indic sbert, bge-m3, LaBSE, multilingual-e5-small, MiniLM) on the evaluation suite (`src/embed/evaluate.py`; dev splits for choices).
+2. Data for round 1: `src/embed/build_data.py` (Dakshina native train sentences, romanized with `romanizer.py`/`rule_roman.py`; English Wikipedia; english-to-hinglish), teacher vectors with `src/embed/teacher.py` (bge-m3).
+3. `embed-v1` (round 1), `embed-v2` (+ native sentences, `build_native_extra.py`), `nllb-fetch` + `embed-v3` (English–Indic pairs from allenai/nllb, `filter_nllb.py`, `build_xling.py`). `diag_sts.py` is the diagnostic that showed the Indic side was losing graded similarity.
+4. `embed-test`: the one test-split run. Packaging: `package_st.py` (also makes the files load in transformers 4.x), `check_st.py`, `export_onnx.py` (fp32 + fp16).
+
 Some job scripts read outputs of earlier jobs (for example cached GlotLID predictions). Test sets were never used for training or for choosing settings; exact overlap between training data and test sets is checked in `jobs/lid-v4/run.sh` and `src/xlit/build_data.py`.
 
 ## Environment
@@ -114,6 +123,7 @@ Adjust the paths to your machine. Teacher-written data is not included here; the
 - [Hinglish-Everyday-Conversations-1M](https://huggingface.co/datasets/Abhishekcr448/Hinglish-Everyday-Conversations-1M) (MIT), [english-to-hinglish](https://huggingface.co/datasets/findnitai/english-to-hinglish) (Apache-2.0), [wikimedia/wikipedia](https://huggingface.co/datasets/wikimedia/wikipedia) (CC BY-SA 4.0): LID training text.
 - [COMI-LINGUA](https://huggingface.co/datasets/LingoIITGN/COMI-LINGUA) (LingoIITGN, CC BY 4.0): LID train split for word-level LID training, test split for testing.
 - Teacher outputs from [Ornith-1.5-35B-A3B](https://huggingface.co/ornith-ai/Ornith-1.5-35B-A3B) (MIT).
+- [allenai/nllb](https://huggingface.co/datasets/allenai/nllb) (ODC-BY 1.0; CommonCrawl-derived, upstream terms apply): English–Indic sentence pairs for the embedder. Embedder teacher: [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) (MIT); STS Benchmark ([mteb/stsbenchmark-sts](https://huggingface.co/datasets/mteb/stsbenchmark-sts)), IndicCrosslingualSTS and IndicGenBench FLORES only for testing.
 - TTS normalizer and ITN number words: [indic-numtowords](https://github.com/AI4Bharat/indic-numtowords) (AI4Bharat, MIT), with corrections in `src/tn/lex_hand.py`; month and unit names from Unicode CLDR via [babel](https://babel.pocoo.org/) (Unicode license).
 
 `src/xlit/indicxlit/custom_interactive.py` is from fairseq (Facebook, MIT; distributed with AI4Bharat IndicXlit) and keeps its original header.
