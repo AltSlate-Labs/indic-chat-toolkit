@@ -99,12 +99,13 @@ spaces/      the browser demos (static HTML + transformers.js; the models run in
 2. `itn-v1`: 1 epoch on the reversed TN data. `itn-v2`: + 15k sentences with internal-zero numbers (`src/itn/zeros.py`; v1 turned 1024 into 124) mixed with 45k v1 rows; `queue.sh` waits for a free GPU.
 3. `itn-eval`: real-sentence tests (`src/itn/make_tests_real.py`): test A = Dakshina validation sentences spoken by rules; test B = LLM-written messages whose spoken form the judge accepts. Scored by digit match (`src/itn/score_itn.py`).
 
-**indic-embed-small (released version = `embed-v3`; each round fine-tunes the previous one)**
+**indic-embed-small (released version = `embed-v5b`; Hub tag `v1` = embed-v3; each round fine-tunes the previous one)**
 
 1. `embed-probe`, `embed-eval`: baselines (l3cube indic sbert, bge-m3, LaBSE, multilingual-e5-small, MiniLM) on the evaluation suite (`src/embed/evaluate.py`; dev splits for choices).
 2. Data for round 1: `src/embed/build_data.py` (Dakshina native train sentences, romanized with `romanizer.py`/`rule_roman.py`; English Wikipedia; english-to-hinglish), teacher vectors with `src/embed/teacher.py` (bge-m3).
 3. `embed-v1` (round 1), `embed-v2` (+ native sentences, `build_native_extra.py`), `nllb-fetch` + `embed-v3` (English–Indic pairs from allenai/nllb, `filter_nllb.py`, `build_xling.py`). `diag_sts.py` is the diagnostic that showed the Indic side was losing graded similarity.
 4. `embed-test`: the one test-split run. Packaging: `package_st.py` (also makes the files load in transformers 4.x), `check_st.py`, `export_onnx.py` (fp32 + fp16).
+5. v2: `embed-v5` (+ 500k English SNLI sentences, `build_nli_text.py`; replays 1.0M embed-v3 rows via `build_mix.py`), leakage check `neardup_sts.py` (STS Benchmark sentences with a near-duplicate in the training text), then `embed-v5b` (same, with near-duplicates of every eval sentence removed) and `embed-v5b-test` (the one test-split run).
 
 **indic-rerank-small (released version = `rerank-v2`; Hub tag `v1` = rerank-v1)**
 
