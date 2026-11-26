@@ -10,19 +10,20 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "embed"))
 from romanizer import Romanizer
 p = argparse.ArgumentParser()
-for a, d in [("--lists", None), ("--base", None), ("--out", None), ("--steps", 6000), ("--q", 16), ("--g", 16), ("--lr", 3e-5),
+for a, d in [("--lists", None), ("--init", ""), ("--base", None), ("--out", None), ("--steps", 6000), ("--q", 16), ("--g", 16), ("--lr", 3e-5),
              ("--roman", 0.5), ("--mixed", 0.15), ("--max_len", 320), ("--ckpt_every", 1000), ("--chunk_steps", 0)]:
     p.add_argument(a, type=type(d) if d is not None else str, default=d)
 A = p.parse_args(); os.makedirs(A.out, exist_ok=True); torch.manual_seed(0); rng = random.Random(0); R = Romanizer(seed=5)
-L = [json.loads(l) for l in open(A.lists, encoding="utf-8")]
+L = [json.loads(l) for f in A.lists.split(",") for l in open(f, encoding="utf-8")]   # comma-separated list files
 L = [x for x in L if len(x["passages"]) >= 4]
 rng.shuffle(L); nd = max(50, len(L) // 33); dev, train = L[:nd], L[nd:]
 print(f"train queries {len(train)} dev {len(dev)}", flush=True)
 tok = AutoTokenizer.from_pretrained(A.base)
-model = AutoModelForSequenceClassification.from_pretrained(A.base, num_labels=1, torch_dtype=torch.float32).cuda()
+model = AutoModelForSequenceClassification.from_pretrained(A.init or A.base, num_labels=1, torch_dtype=torch.float32).cuda()   # --init: continue from a trained reranker
 opt = torch.optim.AdamW(model.parameters(), lr=A.lr, weight_decay=0.01)
 sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: min(1, (s + 1) / 300) * max(0.0, 1 - s / A.steps))
 def view(x, mode):
+    if x["lang"] not in ("hi", "bn", "te"): return x["q"]          # romanize Indic queries only
     if mode == "roman": return R.sentence(x["q"], x["lang"], 1.0)
     if mode == "mixed": return R.sentence(x["q"], x["lang"], 0.5)
     return x["q"]
@@ -56,7 +57,7 @@ def dev_eval():
         for i in range(0, len(dev), A.q):
             b = dev[i:i + A.q]; qs, ps, ts, sizes = [], [], [], []
             for x in b:
-                g = list(range(min(len(x["passages"]), 40))); q = R.sentence(x["q"], x["lang"], 1.0) if mode == "roman" else x["q"]
+                g = list(range(min(len(x["passages"]), 40))); q = R.sentence(x["q"], x["lang"], 1.0) if mode == "roman" and x["lang"] in ("hi", "bn", "te") else x["q"]
                 qs += [q] * len(g); ps += [x["passages"][j] for j in g]; ts += [x["teacher"][j] for j in g]; sizes.append(len(g))
             s = scores(qs, ps); t = torch.tensor(ts, device="cuda"); k = 0
             for n in sizes:
