@@ -10,7 +10,7 @@
 
 # Indic chat toolkit: training and evaluation code
 
-Code behind eight small models for Indian-language text and a browser screenshot redactor: message-level and word-level language ID and transliteration for romanized and native-script chat in 12 South Asian languages (Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Sindhi, Sinhala), text normalization for speech in 10 of them, both directions (TTS input and ASR output), punctuation restoration for ASR output, sentence embeddings for native, romanized and code-mixed text, and a search reranker.
+Code behind nine small models for Indian-language text and a browser screenshot redactor: message-level and word-level language ID and transliteration for romanized and native-script chat in 12 South Asian languages (Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi, Urdu, Sindhi, Sinhala), text normalization for speech in 10 of them, both directions (TTS input and ASR output), punctuation restoration for ASR output, sentence embeddings for native, romanized and code-mixed text, a search reranker, and translation of Hinglish and other Indian-language chat into English.
 
 | Model | What it does | Size | Hub | Demo |
 |---|---|---|---|---|
@@ -22,6 +22,7 @@ Code behind eight small models for Indian-language text and a browser screenshot
 | [**indic-itn-small**](https://huggingface.co/altslate/indic-itn-small) | Spoken → written for ASR output (numbers, ₹, times, dates → digits), 10 languages | 300M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-itn-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-itn-small) | [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/altslate/indic-tts-normalizer) |
 | [**indic-embed-small**](https://huggingface.co/altslate/indic-embed-small) | Sentence embeddings for native-script, romanized and code-mixed Indic text + English (10 languages); search native text with romanized queries | 140M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-embed-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-embed-small) | – |
 | [**indic-rerank-small**](https://huggingface.co/altslate/indic-rerank-small) | Reranker (cross-encoder) for Hindi, Bengali, Telugu and English search, including romanized queries | 140M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-rerank-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-rerank-small) | – |
+| [**indic-chat-mt-small**](https://huggingface.co/altslate/indic-chat-mt-small) | Translation of Hinglish and romanized or native-script chat in 10 Indian languages into English | 483M | [![downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhuggingface.co%2Fapi%2Fmodels%2Faltslate%2Findic-chat-mt-small&query=%24.downloads&label=downloads&logo=huggingface&color=6fae8b)](https://huggingface.co/altslate/indic-chat-mt-small) | [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm.svg)](https://huggingface.co/spaces/altslate/indic-chat-mt) |
 
 Results, data provenance and limitations are on the model cards. This repository is the code **as it was run** to build and test them: research scripts, not a library. It is published so the numbers on the cards can be checked and reproduced.
 
@@ -48,6 +49,7 @@ src/punct/   punctuation restoration: data from punctuated text, 1-800-BAD-CODE 
 src/itn/     inverse text normalization: the TN data reversed with canonical written forms, real-sentence tests, digit-match scorer, baselines
 src/rerank/  reranker: MIRACL candidate lists with indic-embed-small negatives, teacher scores, listwise distillation, MIRACLReranking eval, ONNX checks
 src/embed/   sentence embeddings: romanizer (dictionaries + rules), distillation data, teacher encoding, training, evaluation, sentence-transformers + ONNX packaging
+src/mt/      translation to English: PHINC split, data building (Hinglish, romanized NLLB, Ornith chat), teacher translation, M2M100 training, chrF++ eval, LLM judge, ONNX checks
 jobs/<id>/   the shell script for each GPU job, in the order they were run (see below)
 spaces/      the browser demos (static HTML + transformers.js; the models run in the browser)
 ```
@@ -113,6 +115,15 @@ spaces/      the browser demos (static HTML + transformers.js; the models run in
 2. `rerank-data`: MIRACL train queries (hi, bn, te) with judged passages + top-30 indic-embed-small negatives, scored by bge-reranker-v2-m3 (`build_lists.py`).
 3. `rerank-v1`: training (`train_rerank.py`: native / romanized / half-romanized queries, teacher scores of the native query) and the dev evaluation. Packaging: `package_ce.py` (transformers 4.x compatibility), `check_ce.py`, `export_onnx.py` (fp32 + fp16; int8 rejected).
 4. `rerank-v2`: English lists from Natural Questions pairs (`build_lists_en.py`) and 3,000 more steps from rerank-v1 on Indic + English lists.
+
+**indic-chat-mt-small (released version = `mt-v4`)**
+
+1. `mt-base`: PHINC split (`src/mt/split_phinc.py`, test 3,000 / dev 1,000 / train) and baselines (copy, opus-mt, NLLB-600M). `mt-eval1`: FLORES dev native + romanized (`make_flores_mt.py`); `mt-eval3`: COMI-LINGUA dev (`make_comi_mt.py`, from MT_train only).
+2. `mt-probe` / `mt-v1` / `mt-v2`: Marian (77M) rounds. Data: `build_data.py` (english-to-hinglish with every PHINC dev/test match removed + PHINC train), `build_mix_mt.py` (+ allenai/nllb pairs, native and romanized), `mt-orn1` + `build_mix_mt2.py` (Ornith English for the Hinglish sources, filtered). `mt-eval2`/`mt-eval4`: judge runs (`judge_mt.py`).
+3. `mt-probe2`: M2M100-418M probe, which beat the Marian student; `mt-v3`: M2M100 on the round-2 data with a per-row source-language token (`train_mt.py --src_lang auto`).
+4. `mt-v3b`: Telugu → Kannada script map (M2M100 has no Telugu letters; `te2kn_probe.py` measured it), native Telugu upweighted.
+5. `mt-chat-test`: chat test in 10 languages (the transliteration project's test B; judged, no references). `mt-v4`: 21k Ornith-written chat messages translated by Ornith (`build_chat_mt.py`, 40/language held out as chat dev), 5k more steps.
+6. `mt-test` (mt-v3b, baselines) and `mt-test4` (mt-v4): the one test-split runs. `onnx-mt4`: fp32 / fp16 / int8 ONNX (`greedy_ref_m2m.py` writes the PyTorch reference for the transformers.js check).
 
 Also kept, not released: `embed-v4probe` (contrastive-weight ablation, no effect) and `embed-base` (mmBERT-base student, only +0.8 STS; `wait_resume.sh` resumes chunks only when no other users' containers hold the GPU).
 

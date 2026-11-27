@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Indic Chat Translator</title>
+<style>
+:root { --bg:#fafaf9; --fg:#1c1917; --muted:#57534e; --card:#ffffff; --line:#e7e5e4; --accent:#4338ca; }
+@media (prefers-color-scheme: dark) { :root { --bg:#1c1917; --fg:#f5f5f4; --muted:#a8a29e; --card:#292524; --line:#44403c; --accent:#a5b4fc; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, -apple-system, "Segoe UI", "Noto Sans", sans-serif; }
+main { max-width: 820px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 1.6rem; margin: 0 0 8px; }
+p { color: var(--muted); margin: 0 0 12px; }
+a { color: var(--accent); }
+textarea, select { width:100%; padding:12px; font:inherit; color:var(--fg); background:var(--card); border:1px solid var(--line); border-radius:8px; }
+textarea { min-height:100px; resize:vertical; }
+select { width:auto; padding:6px 10px; }
+button { font:inherit; padding:8px 18px; border-radius:8px; border:0; background:var(--accent); color:var(--bg); cursor:pointer; margin:10px 0; }
+button:disabled { opacity:.5; cursor:default; }
+.ex { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 16px; }
+.ex button { background:transparent; color:var(--fg); border:1px solid var(--line); padding:4px 10px; margin:0; font-size:.85rem; }
+.box { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; min-height:56px; white-space:pre-wrap; word-break:break-word; font-size:1.25rem; }
+.row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+#status, #det { font-size:.9rem; color:var(--muted); }
+h2 { font-size:1rem; margin:16px 0 6px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Indic chat → English</h1>
+<p>Type a message the way people text: Hinglish ("yaar kal ki meeting cancel ho gayi"), or Hindi, Bengali, Tamil, Telugu, Marathi, Gujarati, Kannada, Malayalam, Punjabi or Urdu, romanized or in native script. You get English.</p>
+<p>Model: <a href="https://huggingface.co/altslate/indic-chat-mt-small">altslate/indic-chat-mt-small</a> (483M, MIT), run in your browser with int8 weights and greedy decoding, which are a little less accurate than the full model with beam search. Your text never leaves your device. The first run downloads about 730 MB; "Auto-detect" adds about 140 MB for <a href="https://huggingface.co/altslate/indic-chat-lid-small">altslate/indic-chat-lid-small</a>. Hinglish works best. In other languages, about one message in two loses some meaning, and negation is sometimes lost in Tamil and Telugu; see the model card.</p>
+<div class="ex" id="ex"></div>
+<div class="row"><label for="lang">Language</label> <select id="lang"></select> <span id="det"></span></div>
+<textarea id="inp" aria-label="Message" style="margin-top:10px"></textarea>
+<button id="go" disabled>Loading model…</button> <span id="status"></span>
+<h2>English</h2><div class="box" id="out"></div>
+</main>
+<script type="module">
+import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
+const LANGS = { auto:"Auto-detect", hi:"Hindi / Hinglish", bn:"Bengali", ta:"Tamil", te:"Telugu", mr:"Marathi", gu:"Gujarati",
+  kn:"Kannada", ml:"Malayalam", pa:"Punjabi", ur:"Urdu" };
+// M2M100 has no Telugu: Telugu uses the Kannada code, with Telugu letters mapped to Kannada script (same layout, +0x80).
+const te2kn = (s) => [...s].map((c) => { const u = c.codePointAt(0); return u >= 0xC00 && u <= 0xC7F ? String.fromCodePoint(u + 0x80) : c; }).join("");
+const EX = [["hi","kal mera exam hai, please mere liye pray karna"], ["hi","aaj boss ka mood off hai, chhutti mat maangna"], ["hi","bhai tu kab aa raha hai ghar pe?"],
+  ["hi","mujhe nahi pata woh kahan hai"], ["bn","ami tomake pore phone korbo"], ["ur","aap kaise hain? sab khairiyat?"],
+  ["mr","mi udya yeto, kalji karu nako"], ["gu","kaam ni deadline kaale che"], ["pa","tusi kithe ho? main ghar aa gaya"],
+  ["ta","enakku theriyala"], ["hi","कल मेरा exam है, please मेरे लिए pray करना"]];
+const $ = (id) => document.getElementById(id);
+for (const [k, v] of Object.entries(LANGS)) { const o = document.createElement("option"); o.value = k; o.textContent = v; $("lang").appendChild(o); }
+$("lang").value = "hi";
+let mt = null, lid = null;
+for (const [l, t] of EX) { const b = document.createElement("button"); b.textContent = `${LANGS[l].split(" ")[0]}: ${t.length > 24 ? t.slice(0, 22) + "…" : t}`;
+  b.onclick = () => { $("inp").value = t; if ($("lang").value !== "auto") $("lang").value = l; if (mt) run(); }; $("ex").appendChild(b); }
+$("inp").value = EX[0][1];
+const seen = {};
+const progress = (p) => { if (p.status === "progress" && p.total) { seen[p.file] = [p.loaded, p.total];
+  const [l, t] = Object.values(seen).reduce((a, [x, y]) => [a[0] + x, a[1] + y], [0, 0]);
+  $("status").textContent = `Downloading model… ${Math.round(l / 1e6)} / ${Math.round(t / 1e6)} MB`; } };
+async function run() {
+  const text = $("inp").value.trim(); if (!text) return;
+  $("go").disabled = true; let lang = $("lang").value; $("det").textContent = "";
+  if (lang === "auto") {
+    if (!lid) { $("status").textContent = "Loading language detector…"; lid = await pipeline("text-classification", "altslate/indic-chat-lid-small", { dtype: "q8", progress_callback: progress }); }
+    const [top] = await lid(text); const code = top.label.split("-")[0];
+    if (code === "en") { lang = "hi"; $("det").textContent = "Detected: English (translating as Hinglish)"; }
+    else if (!(code in LANGS)) { $("out").textContent = ""; $("det").textContent = `Detected ${top.label}; not one of the 10 languages.`; $("status").textContent = ""; $("go").disabled = false; return; }
+    else { lang = code; $("det").textContent = `Detected: ${LANGS[code]} (${Math.round(top.score * 100)}%)`; }
+  }
+  $("status").textContent = "Translating…"; const t0 = performance.now();
+  const [o] = await mt(te2kn(text), { src_lang: lang === "te" ? "kn" : lang, tgt_lang: "en", max_new_tokens: 256 });
+  $("out").textContent = o.translation_text;
+  $("status").textContent = `${Math.round(performance.now() - t0)} ms`; $("go").disabled = false;
+}
+try {
+  mt = await pipeline("translation", "altslate/indic-chat-mt-small", { dtype: "q8", progress_callback: progress });
+  $("go").textContent = "Translate"; $("go").onclick = run;
+  $("inp").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) run(); });
+  await run();
+} catch (err) { $("status").textContent = "Could not load the model: " + err.message; }
+</script>
+</body>
+</html>
